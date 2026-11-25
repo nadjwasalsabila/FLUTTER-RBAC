@@ -1,23 +1,22 @@
-import '../../core/database/database_helper.dart';
-import '../../core/models/item_model.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../../core/rbac/rbac_evaluator.dart';
 
 class ManagerService {
-  static final ManagerService instance = ManagerService._internal();
-  ManagerService._internal();
+  ManagerService(this._db);
 
-  Future<List<ItemModel>> getAllItems() async {
-    final db = await DatabaseHelper.instance.database;
-    final result = await db.query('warehouse_items', orderBy: 'sku ASC');
-    return result.map((row) => ItemModel.fromMap(row)).toList();
+  final Database _db;
+
+  Future<List<Map<String, Object?>>> getAllItems() async {
+    final result = await _db.query('warehouse_items', orderBy: 'sku ASC');
+    return result;
   }
 
   Future<bool> isSkuExists(String sku, {int? excludeId}) async {
-    final db = await DatabaseHelper.instance.database;
     final where =
         excludeId != null ? 'sku = ? AND id != ?' : 'sku = ?';
     final args = excludeId != null ? [sku, excludeId] : [sku];
-    final result = await db.query(
+    final result = await _db.query(
       'warehouse_items',
       where: where,
       whereArgs: args,
@@ -26,8 +25,8 @@ class ManagerService {
     return result.isNotEmpty;
   }
 
-  Future<String?> addItem(int userId, ItemModel item) async {
-    final canCreate = await RbacEvaluator.instance.hasPermission(
+  Future<String?> addItem(int userId, Map<String, Object?> item) async {
+    final canCreate = await RbacEvaluator(_db).hasPermission(
       userId,
       'item:create',
     );
@@ -35,36 +34,35 @@ class ManagerService {
       return 'Akses ditolak: Anda tidak memiliki izin item:create.';
     }
 
-    if (item.sku.trim().isEmpty ||
-        item.name.trim().isEmpty ||
-        item.category.trim().isEmpty ||
-        item.location.trim().isEmpty) {
+    if (item['sku']!.toString().trim().isEmpty ||
+        item['name']!.toString().trim().isEmpty ||
+        item['category']!.toString().trim().isEmpty ||
+        item['location']!.toString().trim().isEmpty) {
       return 'Semua input wajib diisi.';
     }
 
-    if (item.stock < 0) {
+    if ((item['stock'] as int?) ?? 0 < 0) {
       return 'Stok awal tidak boleh negatif.';
     }
 
-    final skuExists = await isSkuExists(item.sku.trim());
+    final skuExists = await isSkuExists(item['sku']!.toString().trim());
     if (skuExists) {
-      return 'SKU ${item.sku} sudah digunakan oleh barang lain.';
+      return 'SKU ${item['sku']} sudah digunakan oleh barang lain.';
     }
 
-    final db = await DatabaseHelper.instance.database;
-    await db.insert('warehouse_items', {
-      'sku': item.sku.trim(),
-      'name': item.name.trim(),
-      'category': item.category.trim(),
-      'location': item.location.trim(),
-      'stock': item.stock,
+    await _db.insert('warehouse_items', {
+      'sku': item['sku']!.toString().trim(),
+      'name': item['name']!.toString().trim(),
+      'category': item['category']!.toString().trim(),
+      'location': item['location']!.toString().trim(),
+      'stock': item['stock'],
     });
 
     return null;
   }
 
   Future<String?> deleteItem(int userId, int itemId, String itemSku) async {
-    final canDelete = await RbacEvaluator.instance.hasPermission(
+    final canDelete = await RbacEvaluator(_db).hasPermission(
       userId,
       'item:delete',
     );
@@ -72,8 +70,7 @@ class ManagerService {
       return 'Akses ditolak: Anda tidak memiliki izin item:delete.';
     }
 
-    final db = await DatabaseHelper.instance.database;
-    await db.delete(
+    await _db.delete(
       'warehouse_items',
       where: 'id = ?',
       whereArgs: [itemId],

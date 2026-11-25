@@ -1,49 +1,79 @@
 import 'package:flutter/material.dart';
-import '../../core/models/item_model.dart';
-import '../../core/models/user_model.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../../core/rbac/rbac_evaluator.dart';
-import 'manager_service.dart';
+import '../../core/rbac/rbac_service.dart';
+import '../auth/types/auth_user.dart';
 import 'add_item_page.dart';
 import 'item_detail_page.dart';
+import 'manager_service.dart';
 
 class ManagerPage extends StatefulWidget {
-  final UserModel currentUser;
+  final Database db;
+  final AuthUser currentUser;
 
-  const ManagerPage({super.key, required this.currentUser});
+  const ManagerPage({
+    super.key,
+    required this.db,
+    required this.currentUser,
+  });
 
   @override
   State<ManagerPage> createState() => _ManagerPageState();
 }
 
 class _ManagerPageState extends State<ManagerPage> {
-  List<ItemModel> _items = [];
+  static const _primaryTeal = Color(0xFF145858);
+
+  final RbacEvaluator _rbacEvaluator = RbacEvaluator(_db);
+  final ManagerService _managerService = ManagerService(_db);
+
+  List<Map<String, Object?>> _items = [];
   bool _isLoading = true;
   bool _canCreate = false;
   bool _canDelete = false;
+  late final String _roleName;
 
   @override
   void initState() {
     super.initState();
+    _roleName = _capitalize(widget.currentUser.roleId);
     _loadData();
+  }
+
+  String _capitalize(String s) {
+    if (s.isEmpty) return s;
+    return s[0].toUpperCase() + s.substring(1);
   }
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final items = await ManagerService.instance.getAllItems();
-    final canCreate = await RbacEvaluator.instance.hasPermission(
-      widget.currentUser.id,
-      'item:create',
-    );
-    final canDelete = await RbacEvaluator.instance.hasPermission(
-      widget.currentUser.id,
-      'item:delete',
-    );
-    setState(() {
-      _items = items;
-      _canCreate = canCreate;
-      _canDelete = canDelete;
-      _isLoading = false;
-    });
+    try {
+      final items = await widget.db.query(
+        'warehouse_items',
+        orderBy: 'sku ASC',
+      );
+      final canCreate = await _rbacEvaluator.hasPermission(
+        widget.currentUser.id,
+        'item:create',
+      );
+      final canDelete = await _rbacEvaluator.hasPermission(
+        widget.currentUser.id,
+        'item:delete',
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = items.cast();
+        _canCreate = canCreate;
+        _canDelete = canDelete;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _navigateToAddItem() async {
@@ -58,13 +88,16 @@ class _ManagerPageState extends State<ManagerPage> {
     }
     final result = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => AddItemPage(currentUser: widget.currentUser),
+        builder: (_) => AddItemPage(
+          db: widget.db,
+          currentUser: widget.currentUser,
+        ),
       ),
     );
     if (result == true) await _loadData();
   }
 
-  Future<void> _confirmDelete(ItemModel item) async {
+  Future<void> _confirmDelete(Map<String, Object?> item) async {
     if (!_canDelete) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -79,7 +112,7 @@ class _ManagerPageState extends State<ManagerPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Konfirmasi Hapus'),
-        content: Text('Apakah barang ${item.sku} ingin dihapus?'),
+        content: Text('Apakah barang ${item['sku']} ingin dihapus?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -96,32 +129,36 @@ class _ManagerPageState extends State<ManagerPage> {
 
     if (confirmed != true) return;
 
-    final error = await ManagerService.instance.deleteItem(
-      widget.currentUser.id,
-      item.id!,
-      item.sku,
-    );
-
-    if (!mounted) return;
-
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red),
+    try {
+      await widget.db.delete(
+        'warehouse_items',
+        where: 'id = ?',
+        whereArgs: [item['id']],
       );
-    } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Barang ${item.sku} berhasil dihapus.'),
+          content: Text('Barang ${item['sku']} berhasil dihapus.'),
           backgroundColor: Colors.green,
         ),
       );
       await _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal menghapus: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  void _openDetail(ItemModel item) {
+  void _openDetail(Map<String, Object?> item) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ItemDetailPage(item: item)),
+      MaterialPageRoute(
+        builder: (_) => ItemDetailPage(item: item),
+      ),
     );
   }
 
@@ -147,7 +184,7 @@ class _ManagerPageState extends State<ManagerPage> {
             color: Theme.of(context).colorScheme.primaryContainer,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Text(
-              'Login sebagai: ${widget.currentUser.name} (${widget.currentUser.roleName})',
+              'Login sebagai: ${widget.currentUser.fullName} ($_roleName)',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onPrimaryContainer,
                 fontWeight: FontWeight.w500,
@@ -206,7 +243,7 @@ class _ManagerPageState extends State<ManagerPage> {
 }
 
 class _ItemCard extends StatelessWidget {
-  final ItemModel item;
+  final Map<String, Object?> item;
   final bool canDelete;
   final VoidCallback onTap;
   final VoidCallback onDelete;
@@ -227,12 +264,14 @@ class _ItemCard extends StatelessWidget {
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
           child: Text(
-            item.sku.length > 3 ? item.sku.substring(item.sku.length - 3) : item.sku,
+            item['sku']!.toString().length > 3
+                ? item['sku']!.toString().substring(item['sku']!.toString().length - 3)
+                : item['sku']!.toString(),
             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
           ),
         ),
-        title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${item.sku} · ${item.category} · ${item.location}'),
+        title: Text(item['name']!.toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${item['sku']} · ${item['category']} · ${item['location']}'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -241,11 +280,11 @@ class _ItemCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${item.stock}',
+                  item['stock']!.toString(),
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
-                    color: item.stock < 5 ? Colors.red : Colors.green,
+                    color: (item['stock'] as int) < 5 ? Colors.red : Colors.green,
                   ),
                 ),
                 const Text('stok', style: TextStyle(fontSize: 11, color: Colors.grey)),

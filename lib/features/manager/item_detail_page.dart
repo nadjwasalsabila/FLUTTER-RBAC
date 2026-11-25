@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../core/models/item_model.dart';
 
 class ItemDetailPage extends StatelessWidget {
-  final ItemModel item;
+  final Map<String, Object?> item;
 
   const ItemDetailPage({super.key, required this.item});
 
@@ -23,15 +22,15 @@ class ItemDetailPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildRow('SKU', item.sku),
+                _buildRow('SKU', item['sku']?.toString() ?? '-'),
                 const Divider(),
-                _buildRow('Nama Barang', item.name),
+                _buildRow('Nama Barang', item['name']?.toString() ?? '-'),
                 const Divider(),
-                _buildRow('Kategori', item.category),
+                _buildRow('Kategori', item['category']?.toString() ?? '-'),
                 const Divider(),
-                _buildRow('Lokasi', item.location),
+                _buildRow('Lokasi', item['location']?.toString() ?? '-'),
                 const Divider(),
-                _buildRow('Stok', item.stock.toString()),
+                _buildRow('Stok', item['stock']?.toString() ?? '-'),
               ],
             ),
           ),

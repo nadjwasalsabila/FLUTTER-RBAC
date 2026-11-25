@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
-import '../../core/models/user_model.dart';
-import '../../core/rbac/rbac_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart';
+
+import '../auth/types/auth_user.dart';
 import '../manager/manager_page.dart';
+import '../../core/rbac/rbac_evaluator.dart';
+import '../../core/rbac/rbac_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -11,39 +15,76 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  List<UserModel> _users = [];
+  List<AuthUser> _users = [];
   bool _isLoading = true;
+
+  late final Database _db;
+  late final RbacEvaluator _rbacEvaluator;
+  late final RbacService _rbacService;
+
+  Future<void> _initDb() async {
+    final dbPath = p.join(await getDatabasesPath(), 'warehouse_rbac.db');
+    _db = await openDatabase(
+      dbPath,
+      version: 1,
+      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    _initDb();
+    _rbacEvaluator = RbacEvaluator(_db);
+    _rbacService = RbacService(_db);
     _loadUsers();
   }
 
   Future<void> _loadUsers() async {
     setState(() => _isLoading = true);
-    final users = await RbacService.instance.getAllUsers();
-    setState(() {
-      _users = users;
-      _isLoading = false;
-    });
+    try {
+      final users = await _rbacService.getAllUsers();
+      if (!mounted) return;
+      setState(() {
+        _users = users;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
-  Future<void> _selectUser(UserModel user) async {
-    await RbacService.instance.setCurrentUser(user);
+  Future<void> _selectUser(AuthUser user) async {
+    await _rbacService.setCurrentUser(user);
     if (!mounted) return;
 
-    if (user.roleName == 'Manager') {
+    if (user.roleId == 'manager') {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ManagerPage(currentUser: user),
+          builder: (_) => ManagerPage(
+            db: _db,
+            currentUser: user,
+          ),
+        ),
+      );
+    } else if (user.roleId == 'admin') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => AdminPolicyPage(
+            db: _db,
+            fullName: user.fullName,
+            roleId: user.roleId,
+          ),
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Akun ${user.roleName} belum tersedia di versi ini. Pilih akun Manager.',
+            'Akun ${user.roleId} belum tersedia di versi ini.',
           ),
           backgroundColor: Colors.orange,
         ),
@@ -97,16 +138,16 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 class _UserTile extends StatelessWidget {
-  final UserModel user;
+  final AuthUser user;
   final VoidCallback onTap;
 
   const _UserTile({required this.user, required this.onTap});
 
   IconData _roleIcon(String role) {
     switch (role) {
-      case 'Admin':
+      case 'admin':
         return Icons.admin_panel_settings;
-      case 'Manager':
+      case 'manager':
         return Icons.manage_accounts;
       default:
         return Icons.person;
@@ -115,9 +156,9 @@ class _UserTile extends StatelessWidget {
 
   Color _roleColor(String role) {
     switch (role) {
-      case 'Admin':
+      case 'admin':
         return Colors.red;
-      case 'Manager':
+      case 'manager':
         return Colors.blue;
       default:
         return Colors.green;
@@ -126,17 +167,17 @@ class _UserTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _roleColor(user.roleName);
+    final color = _roleColor(user.roleId);
     return Card(
       elevation: 2,
       child: ListTile(
         onTap: onTap,
         leading: CircleAvatar(
           backgroundColor: color.withAlpha(31),
-          child: Icon(_roleIcon(user.roleName), color: color),
+          child: Icon(_roleIcon(user.roleId), color: color),
         ),
-        title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('Role: ${user.roleName}'),
+        title: Text(user.fullName, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('Role: ${user.roleId}'),
         trailing: const Icon(Icons.chevron_right),
       ),
     );

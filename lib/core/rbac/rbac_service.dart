@@ -1,29 +1,17 @@
-import '../database/database_helper.dart';
-import '../models/user_model.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:rbac/features/auth/types/auth_user.dart';
 
 class RbacService {
-  static final RbacService instance = RbacService._internal();
-  RbacService._internal();
+  RbacService(this._db);
 
-  UserModel? _currentUser;
+  final Database _db;
 
-  UserModel? get currentUser => _currentUser;
-
-  Future<List<UserModel>> getAllUsers() async {
-    final db = await DatabaseHelper.instance.database;
-    final result = await db.rawQuery('''
-      SELECT u.id, u.name, u.role_id, r.name as role_name
-      FROM users u
-      JOIN roles r ON r.id = u.role_id
-    ''');
-    return result.map((row) => UserModel.fromMap(row)).toList();
-  }
-
-  Future<void> setCurrentUser(UserModel user) async {
-    _currentUser = user;
-  }
-
-  void clearCurrentUser() {
-    _currentUser = null;
+  Future<List<AuthUser>> getAllUsers() async {
+    final result = await _db.query(
+      'users',
+      columns: const ['id', 'role_id', 'full_name', 'username', 'is_active'],
+      orderBy: 'id ASC',
+    );
+    return result.map((row) => AuthUser.fromMap(row)).toList();
   }
 }
