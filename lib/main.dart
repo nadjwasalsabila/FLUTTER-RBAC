@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:rbac/features/admin/admin_placeholder.dart';
 import 'package:rbac/features/auth/auth.dart';
+import 'package:rbac/features/manager/item_management/item_management.dart';
 import 'package:rbac/features/staff/stock_adjustment/stock_adjustment.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
@@ -151,26 +153,71 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
               if (user == null) {
                 return DemoLoginScreen(authState: deps.authState);
               }
-              final service = StockAdjustmentService(deps.db, (perm) async {
-                final rows = await deps.db.query(
-                  'role_permissions',
-                  columns: const ['permission_key'],
-                  where: 'role_id = ? AND permission_key = ?',
-                  whereArgs: [user.roleId, perm],
-                  limit: 1,
-                );
-                return StockPermissionDecision(
-                  allowed: rows.isNotEmpty,
-                  missingPermission: rows.isEmpty ? perm : null,
-                );
-              });
-              return StaffInventoryView(
-                service: service,
-                activeUserId: user.id,
-                activeUserName: user.fullName,
-                activeRoleLabel: user.roleId,
-                onSwitchAccount: deps.authState.switchAccount,
-              );
+              switch (user.roleId) {
+                case 'manager':
+                  // Permission checker yang sama dipakai kedua service,
+                  // dan keduanya memakai deps.db yang sama dengan staff
+                  // sehingga stok & riwayat pergerakan selalu terhubung.
+                  Future<bool> checkManagerPermission(String perm) async {
+                    final rows = await deps.db.query(
+                      'role_permissions',
+                      columns: const ['permission_key'],
+                      where: 'role_id = ? AND permission_key = ?',
+                      whereArgs: [user.roleId, perm],
+                      limit: 1,
+                    );
+                    return rows.isNotEmpty;
+                  }
+
+                  final managerService = ManagerItemService(
+                    deps.db,
+                    checkManagerPermission,
+                  );
+                  final stockService = StockAdjustmentService(
+                    deps.db,
+                    (perm) async {
+                      final allowed = await checkManagerPermission(perm);
+                      return StockPermissionDecision(
+                        allowed: allowed,
+                        missingPermission: allowed ? null : perm,
+                      );
+                    },
+                  );
+                  return ManagerInventoryView(
+                    service: managerService,
+                    stockService: stockService,
+                    activeUserId: user.id,
+                    activeUserName: user.fullName,
+                    activeRoleLabel: user.roleId,
+                    onSwitchAccount: deps.authState.switchAccount,
+                  );
+                case 'admin':
+                  // Halaman admin belum dibuat.
+                  return AdminPlaceholder(
+                    onSwitchAccount: deps.authState.switchAccount,
+                  );
+                default:
+                  final service = StockAdjustmentService(deps.db, (perm) async {
+                    final rows = await deps.db.query(
+                      'role_permissions',
+                      columns: const ['permission_key'],
+                      where: 'role_id = ? AND permission_key = ?',
+                      whereArgs: [user.roleId, perm],
+                      limit: 1,
+                    );
+                    return StockPermissionDecision(
+                      allowed: rows.isNotEmpty,
+                      missingPermission: rows.isEmpty ? perm : null,
+                    );
+                  });
+                  return StaffInventoryView(
+                    service: service,
+                    activeUserId: user.id,
+                    activeUserName: user.fullName,
+                    activeRoleLabel: user.roleId,
+                    onSwitchAccount: deps.authState.switchAccount,
+                  );
+              }
             },
           );
         },
