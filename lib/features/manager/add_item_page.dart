@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../core/models/item_model.dart';
-import '../../core/models/user_model.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:rbac/features/auth/types/auth_user.dart';
 import 'manager_service.dart';
 
 class AddItemPage extends StatefulWidget {
-  final UserModel currentUser;
+  final Database db;
+  final AuthUser currentUser;
 
-  const AddItemPage({super.key, required this.currentUser});
+  const AddItemPage({
+    super.key,
+    required this.db,
+    required this.currentUser,
+  });
 
   @override
   State<AddItemPage> createState() => _AddItemPageState();
@@ -38,15 +43,16 @@ class _AddItemPageState extends State<AddItemPage> {
 
     setState(() => _isLoading = true);
 
-    final item = ItemModel(
-      sku: _skuController.text.trim().toUpperCase(),
-      name: _nameController.text.trim(),
-      category: _categoryController.text.trim(),
-      location: _locationController.text.trim(),
-      stock: int.parse(_stockController.text.trim()),
-    );
+    final item = <String, Object?>{
+      'sku': _skuController.text.trim().toUpperCase(),
+      'name': _nameController.text.trim(),
+      'category': _categoryController.text.trim(),
+      'location': _locationController.text.trim(),
+      'stock': int.parse(_stockController.text.trim()),
+    };
 
-    final error = await ManagerService.instance.addItem(
+    final service = ManagerService(widget.db);
+    final error = await service.addItem(
       widget.currentUser.id,
       item,
     );

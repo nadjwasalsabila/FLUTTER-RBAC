@@ -1,32 +1,30 @@
 import 'package:sqflite/sqflite.dart';
-import '../database/database_helper.dart';
 
 class RbacEvaluator {
-  static final RbacEvaluator instance = RbacEvaluator._internal();
-  RbacEvaluator._internal();
+  RbacEvaluator(this._db);
+
+  final Database _db;
 
   Future<bool> hasPermission(int userId, String permissionName) async {
-    final db = await DatabaseHelper.instance.database;
-    final result = await db.rawQuery('''
+    final result = await _db.rawQuery('''
       SELECT COUNT(*) as count
       FROM role_permissions rp
-      JOIN permissions p ON p.id = rp.permission_id
+      JOIN permissions p ON p.key = rp.permission_key
       JOIN users u ON u.role_id = rp.role_id
-      WHERE u.id = ? AND p.name = ?
+      WHERE u.id = ? AND p.key = ? AND rp.is_active = 1
     ''', [userId, permissionName]);
-    final count = Sqflite.firstIntValue(result) ?? 0;
+    final count = result.first['count'] as int? ?? 0;
     return count > 0;
   }
 
   Future<List<String>> getPermissions(int userId) async {
-    final db = await DatabaseHelper.instance.database;
-    final result = await db.rawQuery('''
-      SELECT p.name
+    final result = await _db.rawQuery('''
+      SELECT p.key
       FROM role_permissions rp
-      JOIN permissions p ON p.id = rp.permission_id
+      JOIN permissions p ON p.key = rp.permission_key
       JOIN users u ON u.role_id = rp.role_id
-      WHERE u.id = ?
+      WHERE u.id = ? AND rp.is_active = 1
     ''', [userId]);
-    return result.map((row) => row['name'] as String).toList();
+    return result.map((row) => row['key'] as String).toList();
   }
 }
