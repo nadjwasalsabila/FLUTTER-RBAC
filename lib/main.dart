@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:rbac/features/auth/auth.dart';
+import 'package:rbac/features/manager/manager_dashboard.dart';
 import 'package:rbac/features/staff/stock_adjustment/stock_adjustment.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
@@ -150,6 +151,13 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
               final user = deps.authState.activeUser;
               if (user == null) {
                 return DemoLoginScreen(authState: deps.authState);
+              }
+              if (user.roleId == 'manager' || user.roleId == 'admin') {
+                return ManagerDashboard(
+                  db: deps.db,
+                  user: user,
+                  onSwitchAccount: deps.authState.switchAccount,
+                );
               }
               final service = StockAdjustmentService(deps.db, (perm) async {
                 final rows = await deps.db.query(
