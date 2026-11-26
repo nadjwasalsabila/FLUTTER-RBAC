@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:rbac/features/admin/admin_placeholder.dart';
+import 'package:rbac/features/admin/admin_home_page.dart';
 import 'package:rbac/features/auth/auth.dart';
 import 'package:rbac/features/manager/item_management/item_management.dart';
 import 'package:rbac/features/staff/stock_adjustment/stock_adjustment.dart';
@@ -41,9 +41,22 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
         : p.join(await getDatabasesPath(), 'warehouse_rbac.db');
     return openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, _) => _createAndSeedSchema(db),
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          final columns = await db.rawQuery(
+            'PRAGMA table_info(role_permissions)',
+          );
+          final hasIsActive = columns.any((c) => c['name'] == 'is_active');
+          if (!hasIsActive) {
+            await db.execute(
+              'ALTER TABLE role_permissions ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1',
+            );
+          }
+        }
+      },
     );
   }
 
@@ -51,7 +64,7 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
     const tables = [
       'CREATE TABLE roles (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, description TEXT NOT NULL)',
       'CREATE TABLE permissions (key TEXT PRIMARY KEY, description TEXT NOT NULL)',
-      'CREATE TABLE role_permissions (role_id TEXT NOT NULL, permission_key TEXT NOT NULL, PRIMARY KEY (role_id, permission_key), FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE, FOREIGN KEY (permission_key) REFERENCES permissions(key) ON DELETE CASCADE)',
+      'CREATE TABLE role_permissions (role_id TEXT NOT NULL, permission_key TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (role_id, permission_key), FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE, FOREIGN KEY (permission_key) REFERENCES permissions(key) ON DELETE CASCADE)',
       'CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id TEXT NOT NULL, full_name TEXT NOT NULL, username TEXT NOT NULL UNIQUE, is_active INTEGER NOT NULL, FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT)',
       'CREATE TABLE warehouse_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL UNIQUE, name TEXT NOT NULL, category TEXT NOT NULL, location TEXT NOT NULL, stock INTEGER NOT NULL CHECK (stock >= 0), updated_at TEXT NOT NULL)',
       'CREATE TABLE stock_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL, user_id INTEGER NOT NULL, delta INTEGER NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (item_id) REFERENCES warehouse_items(id) ON DELETE RESTRICT, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT)',
@@ -162,7 +175,8 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
                     final rows = await deps.db.query(
                       'role_permissions',
                       columns: const ['permission_key'],
-                      where: 'role_id = ? AND permission_key = ?',
+                      where:
+                          'role_id = ? AND permission_key = ? AND is_active = 1',
                       whereArgs: [user.roleId, perm],
                       limit: 1,
                     );
@@ -192,8 +206,9 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
                     onSwitchAccount: deps.authState.switchAccount,
                   );
                 case 'admin':
-                  // Halaman admin belum dibuat.
-                  return AdminPlaceholder(
+                  return AdminHomePage(
+                    db: deps.db,
+                    user: user,
                     onSwitchAccount: deps.authState.switchAccount,
                   );
                 default:
@@ -201,7 +216,8 @@ class _WarehouseStaffAppState extends State<WarehouseStaffApp> {
                     final rows = await deps.db.query(
                       'role_permissions',
                       columns: const ['permission_key'],
-                      where: 'role_id = ? AND permission_key = ?',
+                      where:
+                          'role_id = ? AND permission_key = ? AND is_active = 1',
                       whereArgs: [user.roleId, perm],
                       limit: 1,
                     );

@@ -29,6 +29,7 @@ Future<Database> openTestWarehouseDb() async {
           CREATE TABLE role_permissions (
             role_id TEXT NOT NULL,
             permission_key TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (role_id, permission_key),
             FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
             FOREIGN KEY (permission_key) REFERENCES permissions(key) ON DELETE CASCADE
