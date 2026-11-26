@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../auth/types/auth_user.dart';
+import '../admin/admin_home_page.dart';
 import '../manager/manager_page.dart';
 import '../../core/rbac/rbac_evaluator.dart';
 import '../../core/rbac/rbac_service.dart';
@@ -73,10 +74,9 @@ class _LoginPageState extends State<LoginPage> {
     } else if (user.roleId == 'admin') {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => AdminPolicyPage(
+          builder: (_) => AdminHomePage(
             db: _db,
-            fullName: user.fullName,
-            roleId: user.roleId,
+            user: user,
           ),
         ),
       );

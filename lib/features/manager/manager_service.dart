@@ -41,7 +41,7 @@ class ManagerService {
       return 'Semua input wajib diisi.';
     }
 
-    if ((item['stock'] as int?) ?? 0 < 0) {
+    if (((item['stock'] as int?) ?? 0) < 0) {
       return 'Stok awal tidak boleh negatif.';
     }
 
