@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 
-import '../../../common/warehouse_theme.dart';
+import '../../../../core/app_theme.dart';
+import '../../../manager/item_management/types/manager_models.dart';
+import '../../../shared/dashboard_widgets.dart';
+import '../../../shared/flow.dart';
+import '../../../shared/stock_movement_service.dart';
 import '../services/stock_adjustment_service.dart';
 import '../types/stock_models.dart';
-import 'staff_item_card.dart';
-import 'staff_summary_header.dart';
-import 'stock_adjustment_dialog.dart';
 
-/// Halaman "Penyesuaian stok" untuk role staff sesuai desain Figma:
-/// kartu ringkasan teal, kolom pencarian, daftar barang dengan badge,
-/// dan lembar aksi "Ubah stok" saat kartu diketuk.
 class StaffInventoryView extends StatefulWidget {
   const StaffInventoryView({
     super.key,
     required this.service,
+    required this.db,
     required this.activeUserId,
     this.activeUserName,
     this.activeRoleLabel,
@@ -21,6 +21,7 @@ class StaffInventoryView extends StatefulWidget {
   });
 
   final StockAdjustmentService service;
+  final Database db;
   final int activeUserId;
   final String? activeUserName;
   final String? activeRoleLabel;
@@ -31,39 +32,49 @@ class StaffInventoryView extends StatefulWidget {
 }
 
 class _StaffInventoryViewState extends State<StaffInventoryView> {
+  final TextEditingController _searchController = TextEditingController();
+
   List<WarehouseItem> _items = const [];
   bool _isLoading = true;
+  bool _canAdjust = false;
   String? _statusMessage;
   bool _isErrorStatus = false;
-  String _searchQuery = '';
+  String _query = '';
 
-  List<WarehouseItem> get _filteredItems {
-    final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) return _items;
-    return _items
-        .where(
-          (item) =>
-              item.name.toLowerCase().contains(query) ||
-              item.sku.toLowerCase().contains(query) ||
-              item.category.toLowerCase().contains(query) ||
-              item.location.toLowerCase().contains(query),
-        )
-        .toList();
-  }
+  late final StockMovementService _movementService =
+      StockMovementService(widget.db);
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      if (!mounted) return;
+      setState(() => _query = _searchController.text.trim().toLowerCase());
+    });
     _loadItems();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadItems() async {
     setState(() => _isLoading = true);
     final result = await widget.service.getItems();
+    // Izin dicek lewat service stok itu sendiri; hasilnya dipakai untuk
+    // memutuskan apakah aksi "Ubah Stok" ditawarkan atau tidak.
+    final canAdjust =
+        (await widget.service.checkPermission(
+          StockAdjustmentService.adjustPermission,
+        ))
+            .allowed;
     if (!mounted) return;
     setState(() {
       _isLoading = false;
       _items = result.items;
+      _canAdjust = canAdjust;
       if (!result.allowed) {
         _statusMessage = result.errorMessage;
         _isErrorStatus = true;
@@ -71,193 +82,136 @@ class _StaffInventoryViewState extends State<StaffInventoryView> {
     });
   }
 
-  Future<void> _openAdjustDialog(WarehouseItem item) async {
-    final input = await StockAdjustmentDialog.show(context, item: item);
-    if (input == null || !mounted) return;
-
-    final result = await widget.service.adjustStock(
-      StockAdjustmentRequest(
-        itemId: item.id,
-        userId: widget.activeUserId,
-        type: input.type,
-        amount: input.amount,
-        reason: input.reason,
-      ),
-    );
-    if (!mounted) return;
-
-    setState(() {
-      _statusMessage = result.message;
-      _isErrorStatus = !result.success;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.message)),
-    );
-    if (result.success) await _loadItems();
+  List<WarehouseItem> get _filteredItems {
+    if (_query.isEmpty) return _items;
+    return _items.where((item) {
+      return item.sku.toLowerCase().contains(_query) ||
+          item.name.toLowerCase().contains(_query) ||
+          item.category.toLowerCase().contains(_query) ||
+          item.location.toLowerCase().contains(_query);
+    }).toList();
   }
 
-  /// Lembar detail barang + tombol amber "Ubah stok" saat kartu diketuk.
-  Future<void> _openItemDetails(WarehouseItem item) {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  /// SATU alur gabungan "Ubah Stok" (staff hanya boleh stok):
+  /// form → konfirmasi → layar sukses.
+  Future<void> _openEditStock(ManagerItem item) async {
+    if (!_canAdjust) {
+      _showStatus(StockAdjustmentService.adjustDeniedMessage, isError: true);
+      return;
+    }
+    await ItemEditPage.push(
+      context,
+      item: item,
+      canEditData: false,
+      canAdjustStock: _canAdjust,
+      saveData: (_) async => throw UnsupportedError('no data edit'),
+      adjustStock: (input) => widget.service.adjustStock(
+        StockAdjustmentRequest(
+          itemId: item.id,
+          userId: widget.activeUserId,
+          type: input.type,
+          amount: input.amount,
+          reason: input.reason,
+        ),
       ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: WarehouseColors.softMint,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    const WarehouseItemChip(),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
-                              color: WarehouseColors.darkText,
-                            ),
-                          ),
-                          Text(
-                            '${item.sku} • ${item.category} • ${item.location}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              color: WarehouseColors.subtitleText,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    WarehouseStockBadge(stock: item.stock),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: WarehouseColors.paleMint,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.inventory_outlined,
-                        size: 18,
-                        color: WarehouseColors.primaryTeal,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Stok saat ini: ${item.stock} unit',
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: WarehouseColors.primaryTeal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                WarehousePrimaryButton(
-                  label: 'Ubah stok',
-                  icon: Icons.tune,
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                    _openAdjustDialog(item);
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
+    if (mounted) await _loadItems();
+  }
+
+  /// Tap kartu → halaman detail penuh; tombol tunggal "Ubah Stok".
+  Future<void> _openDetail(WarehouseItem warehouseItem) {
+    final item = ManagerItem(
+      id: warehouseItem.id,
+      sku: warehouseItem.sku,
+      name: warehouseItem.name,
+      category: warehouseItem.category,
+      location: warehouseItem.location,
+      stock: warehouseItem.stock,
+      satuan: warehouseItem.satuan,
+      minStock: warehouseItem.minStock,
+    );
+    return ItemDetailPage.push(
+      context,
+      item: item,
+      movementService: _movementService,
+      canAdjustStock: _canAdjust,
+      onEdit: () => _openEditStock(item),
+    ).then((_) {
+      if (mounted) _loadItems();
+    });
+  }
+
+  /// Satu sumber umpan balik saja: banner inline. Tidak ada snackbar ganda.
+  void _showStatus(String message, {bool isError = false}) {
+    setState(() {
+      _statusMessage = message;
+      _isErrorStatus = isError;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalStock = _items.fold<int>(0, (sum, item) => sum + item.stock);
-    final filteredItems = _filteredItems;
-
+    final lowStock =
+        _items.where((item) => item.stock <= item.minStock).length;
+    final filtered = _filteredItems;
     return Scaffold(
-      backgroundColor: WarehouseColors.background,
-      appBar: WarehouseAppBar(
-        subtitle:
-            'Halo, ${widget.activeUserName ?? 'Petugas Gudang'} · ${widget.activeRoleLabel ?? 'staff'}',
-        onSwitchAccount: widget.onSwitchAccount,
+      backgroundColor: AppColors.paleMint,
+      appBar: AppBar(
+        title: const Text('Gudang RBAC'),
+        actions: [
+          IconButton(
+            onPressed: _isLoading ? null : _loadItems,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Muat ulang',
+          ),
+        ],
       ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 920),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                  child: WarehousePageHeader(
-                    title: 'Penyesuaian stok',
-                    subtitle: 'Pilih barang lalu sesuaikan jumlah stoknya',
-                  ),
+                DashboardUserHeader(
+                  userName: widget.activeUserName,
+                  roleLabel: widget.activeRoleLabel,
+                  onSwitchAccount: widget.onSwitchAccount,
+                ),
+                DashboardHeroCard(
+                  title: 'Beranda gudang',
+                  subtitle: 'Kelola barang, pantau stok harian.',
+                  stats: [
+                    DashboardStat('Jenis barang', '${_items.length}'),
+                    DashboardStat('Stok menipis', '$lowStock'),
+                  ],
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                  child: StaffSummaryHeader(
-                    userName: widget.activeUserName,
-                    roleLabel: widget.activeRoleLabel,
-                    itemCount: _items.length,
-                    totalStock: totalStock,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(
+                      hintText: 'Cari nama atau kode barang',
+                      prefixIcon: Icon(Icons.search),
+                    ),
                   ),
                 ),
                 if (_statusMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: StaffStatusBanner(
-                      message: _statusMessage!,
-                      isError: _isErrorStatus,
-                      onDismiss: () => setState(() => _statusMessage = null),
-                    ),
+                  AppStatusBanner(
+                    message: _statusMessage!,
+                    isError: _isErrorStatus,
+                    onDismiss: () => setState(() => _statusMessage = null),
                   ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                  child: WarehouseSearchField(
-                    onChanged: (value) => setState(() => _searchQuery = value),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                  child: WarehouseSectionHeader(
-                    title: 'Daftar barang',
-                    trailing: '${filteredItems.length} barang',
+                DashboardSectionTitle(count: filtered.length),
+                Expanded(
+                  child: RefreshIndicator(
+                    color: AppColors.primaryTeal,
+                    onRefresh: _loadItems,
+                    child: _buildBody(filtered),
                   ),
                 ),
-                Expanded(child: _buildBody(filteredItems)),
+                const DashboardHintBar(
+                  message: 'Pilih barang untuk melihat detail dan mengubah stok.',
+                ),
               ],
             ),
           ),
@@ -269,29 +223,45 @@ class _StaffInventoryViewState extends State<StaffInventoryView> {
   Widget _buildBody(List<WarehouseItem> items) {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(color: WarehouseColors.primaryTeal),
+        child: CircularProgressIndicator(color: AppColors.primaryTeal),
       );
     }
-    if (_items.isEmpty) {
-      return const Center(child: Text('Tidak ada data barang tersedia.'));
-    }
     if (items.isEmpty) {
-      return const Center(
-        child: Text(
-          'Tidak ada barang yang cocok dengan pencarian.',
-          style: TextStyle(color: WarehouseColors.subtitleText),
-        ),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
+        children: const [
+          SizedBox(height: 80),
+          Icon(Icons.inventory_2_outlined, size: 48, color: Colors.black26),
+          SizedBox(height: 10),
+          Center(
+            child: Text(
+              'Belum ada barang tersedia.',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
+          ),
+        ],
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final item = items[index];
-        return StaffItemCard(
-          item: item,
-          onOpenDetails: () => _openItemDetails(item),
+        return DashboardItemCard(
+          item: ManagerItem(
+            id: item.id,
+            sku: item.sku,
+            name: item.name,
+            category: item.category,
+            location: item.location,
+            stock: item.stock,
+            satuan: item.satuan,
+            minStock: item.minStock,
+          ),
+          onTap: () => _openDetail(item),
         );
       },
     );

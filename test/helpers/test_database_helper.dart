@@ -29,6 +29,7 @@ Future<Database> openTestWarehouseDb() async {
           CREATE TABLE role_permissions (
             role_id TEXT NOT NULL,
             permission_key TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (role_id, permission_key),
             FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
             FOREIGN KEY (permission_key) REFERENCES permissions(key) ON DELETE CASCADE
@@ -41,6 +42,7 @@ Future<Database> openTestWarehouseDb() async {
             full_name TEXT NOT NULL,
             username TEXT NOT NULL UNIQUE,
             is_active INTEGER NOT NULL,
+            password TEXT NOT NULL DEFAULT 'demo123',
             FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT
           )
         ''');
@@ -52,6 +54,8 @@ Future<Database> openTestWarehouseDb() async {
             category TEXT NOT NULL,
             location TEXT NOT NULL,
             stock INTEGER NOT NULL CHECK (stock >= 0),
+            satuan TEXT NOT NULL DEFAULT 'unit',
+            min_stock INTEGER NOT NULL DEFAULT 10,
             updated_at TEXT NOT NULL
           )
         ''');
@@ -135,6 +139,8 @@ Future<void> _seedBaseData(Database db) async {
     'category': 'Alas Kaki',
     'location': 'Aisle A-01',
     'stock': 10,
+    'satuan': 'pasang',
+    'min_stock': 10,
     'updated_at': '2026-11-25T10:00:00.000',
   });
   await db.insert('warehouse_items', {
@@ -144,6 +150,8 @@ Future<void> _seedBaseData(Database db) async {
     'category': 'Pengemasan',
     'location': 'Aisle B-03',
     'stock': 25,
+    'satuan': 'unit',
+    'min_stock': 5,
     'updated_at': '2026-11-25T10:00:00.000',
   });
 }

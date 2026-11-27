@@ -10,17 +10,18 @@ void main() {
     final db = await openTestWarehouseDb();
     addTearDown(db.close);
 
-    await tester.pumpWidget(WarehouseStaffApp(database: db));
+    await tester.pumpWidget(
+      WarehouseStaffApp(database: db, showOnboarding: false),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Masuk Gudang RBAC'), findsOneWidget);
-    await tester.tap(find.text('Petugas Gudang (staff)'));
-    await tester.pump();
-    await tester.tap(find.text('Masuk'));
+    expect(find.text('Gudang RBAC'), findsOneWidget);
+    await tester.ensureVisible(find.text('Petugas Gudang · staff'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Petugas Gudang · staff'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Stok Gudang'), findsOneWidget);
-    expect(find.text('Penyesuaian stok'), findsOneWidget);
+    expect(find.text('Sepatu Safety Steel Toe'), findsOneWidget);
     expect(find.text('Sepatu Safety Steel Toe'), findsOneWidget);
   });
 }
