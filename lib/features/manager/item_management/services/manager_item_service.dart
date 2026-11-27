@@ -45,6 +45,8 @@ class ManagerItemService {
         'category',
         'location',
         'stock',
+        'satuan',
+        'min_stock',
         'updated_at',
       ],
       orderBy: 'sku ASC',
@@ -108,6 +110,8 @@ class ManagerItemService {
         'category': category,
         'location': location,
         'stock': input.stock,
+        'satuan': input.satuan.trim().isEmpty ? 'unit' : input.satuan.trim(),
+        'min_stock': input.minStock < 0 ? 0 : input.minStock,
         'updated_at': timestamp,
       });
 
@@ -186,6 +190,8 @@ class ManagerItemService {
           'name': name,
           'category': category,
           'location': location,
+          'satuan': input.satuan.trim().isEmpty ? 'unit' : input.satuan.trim(),
+          'min_stock': input.minStock < 0 ? 0 : input.minStock,
           'updated_at': _now().toIso8601String(),
         },
         where: 'id = ?',

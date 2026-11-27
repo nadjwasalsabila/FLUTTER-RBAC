@@ -7,6 +7,8 @@ class WarehouseItem {
     required this.location,
     required this.stock,
     required this.updatedAt,
+    this.satuan = 'unit',
+    this.minStock = 10,
   });
 
   final int id;
@@ -17,6 +19,12 @@ class WarehouseItem {
   final int stock;
   final String updatedAt;
 
+  /// Satuan barang, mis. "pasang", "lembar", "unit".
+  final String satuan;
+
+  /// Batas stok minimum sebelum barang dianggap "menipis".
+  final int minStock;
+
   factory WarehouseItem.fromMap(Map<String, Object?> map) {
     return WarehouseItem(
       id: map['id']! as int,
@@ -26,6 +34,8 @@ class WarehouseItem {
       location: map['location']! as String,
       stock: map['stock']! as int,
       updatedAt: map['updated_at']! as String,
+      satuan: (map['satuan'] ?? 'unit') as String,
+      minStock: (map['min_stock'] ?? 10) as int,
     );
   }
 }

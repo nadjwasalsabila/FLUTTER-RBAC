@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../core/app_theme.dart';
+
 class AdminPolicyPage extends StatefulWidget {
   final Database db;
   final String fullName;
@@ -18,12 +20,6 @@ class AdminPolicyPage extends StatefulWidget {
 }
 
 class _AdminPolicyPageState extends State<AdminPolicyPage> {
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _warmAmber = Color(0xFFF7B318);
-  static const _paleMint = Color(0xFFE8F1E9);
-  static const _darkText = Color(0xFF102A2A);
-
   final Set<String> _updating = {};
 
   List<Map<String, Object?>> _roles = [];
@@ -31,6 +27,7 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
   List<List<bool>> _matrix = [];
   bool _isLoading = true;
   String? _lastMessage;
+  bool _lastMessageIsError = false;
 
   @override
   void initState() {
@@ -45,27 +42,26 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
           orderBy: 'display_name COLLATE NOCASE ASC');
       final permissions = await widget.db.query('permissions',
           orderBy: 'key COLLATE NOCASE ASC');
+      // Satu query untuk seluruh matriks — bukan N×M query per sel.
+      final allRows = await widget.db.query(
+        'role_permissions',
+        columns: const ['role_id', 'permission_key', 'is_active'],
+      );
+      final active = <String>{
+        for (final r in allRows)
+          if ((r['is_active'] as int? ?? 0) == 1)
+            '${r['role_id']}:${r['permission_key']}',
+      };
 
       final matrix = List.generate(
-          roles.length, (_) => List.filled(permissions.length, false));
-
-      for (var ri = 0; ri < roles.length; ri++) {
-        final roleId = roles[ri]['id'] as String;
-        for (var pi = 0; pi < permissions.length; pi++) {
-          final permKey = permissions[pi]['key'] as String;
-          final row = await widget.db.query(
-            'role_permissions',
-            columns: const ['is_active'],
-            where: 'role_id = ? AND permission_key = ?',
-            whereArgs: [roleId, permKey],
-            limit: 1,
-          );
-          if (row.isNotEmpty) {
-            final active = row.first['is_active'] as int? ?? 0;
-            matrix[ri][pi] = active == 1;
-          }
-        }
-      }
+        roles.length,
+        (ri) => List.generate(
+          permissions.length,
+          (pi) => active.contains(
+            '${roles[ri]['id']}:${permissions[pi]['key']}',
+          ),
+        ),
+      );
 
       if (!mounted) return;
       setState(() {
@@ -74,18 +70,21 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
         _matrix = matrix;
         _isLoading = false;
         _lastMessage = 'Matriks izin dimuat.';
+        _lastMessageIsError = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _lastMessage = 'Gagal memuat: ${e.toString()}';
+        _lastMessageIsError = true;
       });
     }
   }
 
   Future<void> _toggle(int ri, int pi) async {
     final roleId = _roles[ri]['id'] as String;
+    final roleName = _roles[ri]['display_name'] as String;
     final permKey = _permissions[pi]['key'] as String;
     final key = '$roleId:$permKey';
     if (_updating.contains(key)) return;
@@ -118,13 +117,15 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
       if (!mounted) return;
       setState(() {
         _matrix[ri][pi] = !_matrix[ri][pi];
-        _lastMessage = '${_roles[ri]['display_name']} — '
-            '${permKey} ${_matrix[ri][pi] ? 'diaktifkan' : 'dinonaktifkan'}.';
+        _lastMessage =
+            'Izin "$permKey" untuk $roleName ${_matrix[ri][pi] ? 'diaktifkan' : 'dinonaktifkan'}.';
+        _lastMessageIsError = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _lastMessage = 'Gagal: ${e.toString()}';
+        _lastMessageIsError = true;
       });
     } finally {
       if (mounted) setState(() => _updating.remove(key));
@@ -134,75 +135,79 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _paleMint,
+      backgroundColor: AppColors.paleMint,
       appBar: AppBar(
-        backgroundColor: _primaryTeal,
-        foregroundColor: Colors.white,
         title: const Text('Kelola izin peran'),
-        centerTitle: false,
-        elevation: 0,
-        leading: IconButton(
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-        ),
         actions: [
           IconButton(
             onPressed: _isLoading ? null : _loadData,
-            icon: const Icon(Icons.refresh,
-                color: Colors.white, size: 20),
+            icon: const Icon(Icons.refresh, size: 20),
             tooltip: 'Muat ulang',
           ),
         ],
       ),
       body: SafeArea(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildInfoCard(),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.admin_panel_settings,
-                          color: _primaryTeal, size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Daftar izin per role',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: _primaryTeal,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildInfoCard(),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.admin_panel_settings,
+                            color: AppColors.primaryTeal, size: 22),
+                        SizedBox(width: 8),
+                        Text(
+                          'Daftar izin per role',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.darkText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_lastMessage != null)
+                    AppStatusBanner(
+                      message: _lastMessage!,
+                      isError: _lastMessageIsError,
+                      onDismiss: () =>
+                          setState(() => _lastMessage = null),
+                    ),
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.primaryTeal,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                if (_lastMessage != null) _buildStatusChip(),
-                if (_isLoading)
-                  const Center(
-                    child: CircularProgressIndicator(color: _primaryTeal),
-                  )
-                else if (_roles.isEmpty)
-                  const Center(
-                    child: Text(
-                      'Tidak ada data.',
-                      style: TextStyle(color: Colors.black54),
+                    )
+                  else if (_roles.isEmpty)
+                    const Center(
+                      child: Text(
+                        'Tidak ada data.',
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  else
+                    _PolicyTable(
+                      roles: _roles,
+                      permissions: _permissions,
+                      matrix: _matrix,
+                      onToggle: _toggle,
+                      updating: _updating,
                     ),
-                  )
-                else
-                  _PolicyTable(
-                    roles: _roles,
-                    permissions: _permissions,
-                    matrix: _matrix,
-                    onToggle: _toggle,
-                    updating: _updating,
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -211,82 +216,47 @@ class _AdminPolicyPageState extends State<AdminPolicyPage> {
   }
 
   Widget _buildInfoCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _softMint),
-      ),
+    return AppCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
-              color: _primaryTeal.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
+              color: AppColors.paleMint,
+              borderRadius: BorderRadius.circular(AppRadius.tile),
             ),
             child: const Icon(Icons.shield_outlined,
-                color: _primaryTeal, size: 24),
+                color: AppColors.primaryTeal, size: 24),
           ),
           const SizedBox(width: 14),
-          Expanded(
+          const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Sistem hak akses berbasis role',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
                     fontSize: 15,
-                    color: _primaryTeal,
+                    color: AppColors.darkText,
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: 6),
                 Text(
                   'Dengan sistem RBAC, setiap role memiliki izin berbeda. '
-                  'Admin dapat mengatur izin dengan mengaktifkan atau '
-                  'menonaktifkan sel di bawah.',
+                  'Ketuk sel di bawah untuk mengaktifkan atau '
+                  'menonaktifkan izin.',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors.black54,
+                    color: AppColors.textMuted,
                   ),
                 ),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildStatusChip() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE3F2E7),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _softMint),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle,
-                color: _primaryTeal, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              _lastMessage!,
-              style: const TextStyle(
-                fontSize: 13,
-                color: _primaryTeal,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -307,81 +277,71 @@ class _PolicyTable extends StatelessWidget {
     required this.updating,
   });
 
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _warmAmber = Color(0xFFF7B318);
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _softMint),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 44,
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 130,
-                    child: const Center(
-                      child: Text(
-                        'Izin / Peran',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          color: _primaryTeal,
-                        ),
+    return AppCard(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 130,
+                  child: const Center(
+                    child: Text(
+                      'Izin / Peran',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: AppColors.primaryTeal,
                       ),
                     ),
                   ),
-                  ...permissions.map((p) {
-                    final key = p['key'] as String;
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              _permIcon(key),
-                              size: 18,
-                              color: _primaryTeal,
+                ),
+                ...permissions.map((p) {
+                  final key = p['key'] as String;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _permIcon(key),
+                            size: 18,
+                            color: AppColors.primaryTeal,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            key.replaceAll(':', ' '),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.darkText,
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              key.replaceAll(':', ' '),
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              textAlign: TextAlign.center,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                    );
-                  }),
-                ],
-              ),
+                    ),
+                  );
+                }),
+              ],
             ),
-            const Divider(height: 1, color: Color(0xFFE3EDE4)),
-            ...List.generate(roles.length, (ri) => _RoleRow(
-                  roles: roles,
-                  permissions: permissions,
-                  matrix: matrix,
-                  onToggle: onToggle,
-                  updating: updating,
-                  ri: ri,
-                )),
-          ],
-        ),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          ...List.generate(roles.length, (ri) => _RoleRow(
+                roles: roles,
+                permissions: permissions,
+                matrix: matrix,
+                onToggle: onToggle,
+                updating: updating,
+                ri: ri,
+              )),
+        ],
       ),
     );
   }
@@ -415,12 +375,6 @@ class _RoleRow extends StatelessWidget {
     required this.ri,
   });
 
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _warmAmber = Color(0xFFF7B318);
-  static const _paleMint = Color(0xFFE8F1E9);
-  static const _darkText = Color(0xFF102A2A);
-
   @override
   Widget build(BuildContext context) {
     final role = roles[ri];
@@ -447,14 +401,14 @@ class _RoleRow extends StatelessWidget {
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
-                        color: _primaryTeal,
+                        color: AppColors.darkText,
                       ),
                     ),
                     Text(
                       role['description'] as String? ?? '',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 10,
-                        color: Colors.grey[600],
+                        color: AppColors.textMuted,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -463,49 +417,41 @@ class _RoleRow extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              width: 1,
-              height: 24,
-              color: const Color(0xFFE3EDE4),
-            ),
+            Container(width: 1, height: 24, color: AppColors.border),
             ...List.generate(permissions.length, (pi) {
               final active = matrix[ri][pi];
-              final permKey = permissions[pi]['key'] as String;
-              final key = '${roles[ri]['id']}:$permKey';
+              final key = '${roles[ri]['id']}:${permissions[pi]['key'] as String}';
+              final isUpdating = updating.contains(key);
               return Expanded(
                 child: GestureDetector(
-                  onTap: updating.contains(key) ? null : () => onToggle(ri, pi),
+                  onTap: isUpdating ? null : () => onToggle(ri, pi),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     decoration: BoxDecoration(
-                      color: active ? const Color(0xFFE3F2E7) : const Color(0xFFF0F0F0),
+                      color: active
+                          ? AppColors.successBg
+                          : const Color(0xFFF0F0F0),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: active ? const Color(0xFF145858) : Colors.grey.shade300,
+                        color: active
+                            ? AppColors.primaryTeal
+                            : Colors.grey.shade300,
                         width: 1.2,
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          updating.contains(key)
-                              ? Icons.sync
-                              : (active ? Icons.check_circle : Icons.circle_outlined),
-                          size: 16,
-                          color: active ? _primaryTeal : Colors.grey,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          permKey.replaceAll(':', ' '),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-                            color: active ? _primaryTeal : Colors.grey.shade500,
-                          ),
-                        ),
-                      ],
+                    child: Center(
+                      child: Icon(
+                        isUpdating
+                            ? Icons.sync
+                            : (active
+                                ? Icons.check_circle
+                                : Icons.circle_outlined),
+                        size: 18,
+                        color: active
+                            ? AppColors.primaryTeal
+                            : Colors.grey,
+                      ),
                     ),
                   ),
                 ),

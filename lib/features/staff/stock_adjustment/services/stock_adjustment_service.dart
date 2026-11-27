@@ -20,6 +20,11 @@ class StockAdjustmentService {
   final StaffPermissionChecker _checkPermission;
   final DateTime Function() _now;
 
+  /// Dipakai UI untuk memutuskan apakah aksi tertentu boleh ditampilkan.
+  Future<StockPermissionDecision> checkPermission(String permissionKey) {
+    return _checkPermission(permissionKey);
+  }
+
   Future<WarehouseItemsResult> getItems() async {
     final decision = await _checkPermission(readPermission);
     if (!decision.allowed) {
@@ -39,6 +44,8 @@ class StockAdjustmentService {
         'category',
         'location',
         'stock',
+        'satuan',
+        'min_stock',
         'updated_at',
       ],
       orderBy: 'name ASC',
