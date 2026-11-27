@@ -19,7 +19,8 @@ void main() {
     await tester.tap(find.text('Masuk'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Gudang RBAC — Stok Barang'), findsOneWidget);
+    expect(find.text('Stok Gudang'), findsOneWidget);
+    expect(find.text('Penyesuaian stok'), findsOneWidget);
     expect(find.text('Sepatu Safety Steel Toe'), findsOneWidget);
   });
 }

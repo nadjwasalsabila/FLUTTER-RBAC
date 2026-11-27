@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../common/warehouse_theme.dart';
 import '../../../staff/stock_adjustment/stock_adjustment.dart';
 import '../services/manager_item_service.dart';
 import '../types/manager_models.dart';
@@ -7,6 +8,9 @@ import 'item_form_dialog.dart';
 import 'manager_item_card.dart';
 import 'manager_summary_header.dart';
 
+/// Halaman "Beranda gudang" untuk role manager sesuai desain Figma:
+/// kartu ringkasan teal, kolom pencarian, daftar barang, dan tombol
+/// amber "Tambah barang" di bawah.
 class ManagerInventoryView extends StatefulWidget {
   const ManagerInventoryView({
     super.key,
@@ -33,8 +37,6 @@ class ManagerInventoryView extends StatefulWidget {
 }
 
 class _ManagerInventoryViewState extends State<ManagerInventoryView> {
-  static const _primaryTeal = Color(0xFF145858);
-
   List<ManagerItem> _items = const [];
   bool _isLoading = true;
   bool _canCreate = false;
@@ -42,6 +44,21 @@ class _ManagerInventoryViewState extends State<ManagerInventoryView> {
   bool _canAdjustStock = false;
   String? _statusMessage;
   bool _isErrorStatus = false;
+  String _searchQuery = '';
+
+  List<ManagerItem> get _filteredItems {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return _items;
+    return _items
+        .where(
+          (item) =>
+              item.name.toLowerCase().contains(query) ||
+              item.sku.toLowerCase().contains(query) ||
+              item.category.toLowerCase().contains(query) ||
+              item.location.toLowerCase().contains(query),
+        )
+        .toList();
+  }
 
   @override
   void initState() {
@@ -161,33 +178,7 @@ class _ManagerInventoryViewState extends State<ManagerInventoryView> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Konfirmasi Hapus',
-          style: TextStyle(color: _primaryTeal, fontWeight: FontWeight.w700),
-        ),
-        content: Text('Apakah barang ${item.sku} ingin dihapus?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child:
-                const Text('Batal', style: TextStyle(color: _primaryTeal)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Hapus'),
-          ),
-        ],
-      ),
+      builder: (ctx) => _WarehouseConfirmDialog(item: item),
     );
 
     if (confirmed != true || !mounted) return;
@@ -196,6 +187,138 @@ class _ManagerInventoryViewState extends State<ManagerInventoryView> {
     if (!mounted) return;
     _showStatus(result.message, isError: !result.success);
     if (result.success) await _loadItems();
+  }
+
+  /// Lembar aksi barang (Ubah Stok / Edit / Hapus) saat kartu diketuk.
+  Future<void> _openItemActions(ManagerItem item) {
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: WarehouseColors.softMint,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const WarehouseItemChip(),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              color: WarehouseColors.darkText,
+                            ),
+                          ),
+                          Text(
+                            '${item.sku} • ${item.category} • ${item.location}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: WarehouseColors.subtitleText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    WarehouseStockBadge(stock: item.stock),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                WarehousePrimaryButton(
+                  label: 'Ubah Stok',
+                  icon: Icons.tune,
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                    _openAdjustDialog(item);
+                  },
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _canCreate
+                      ? () {
+                          Navigator.of(sheetContext).pop();
+                          _openEditDialog(item);
+                        }
+                      : null,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: Text(
+                    _canCreate ? 'Edit barang' : 'Edit barang (tanpa izin)',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _canCreate
+                        ? WarehouseColors.primaryTeal
+                        : Colors.grey,
+                    side: BorderSide(
+                      color: _canCreate
+                          ? WarehouseColors.softMint
+                          : Colors.grey.shade300,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _canDelete
+                      ? () {
+                          Navigator.of(sheetContext).pop();
+                          _confirmDelete(item);
+                        }
+                      : null,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: Text(
+                    _canDelete ? 'Hapus barang' : 'Hapus barang (tanpa izin)',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _canDelete
+                        ? WarehouseColors.dangerRed
+                        : Colors.grey,
+                    side: BorderSide(
+                      color: _canDelete
+                          ? WarehouseColors.dangerBg
+                          : Colors.grey.shade300,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showStatus(String message, {bool isError = false}) {
@@ -211,30 +334,31 @@ class _ManagerInventoryViewState extends State<ManagerInventoryView> {
   @override
   Widget build(BuildContext context) {
     final totalStock = _items.fold<int>(0, (sum, item) => sum + item.stock);
+    final filteredItems = _filteredItems;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F8F6),
-      appBar: AppBar(
-        backgroundColor: _primaryTeal,
-        foregroundColor: Colors.white,
-        title: const Text('Gudang RBAC — Manajemen Barang'),
-        actions: [
-          if (widget.onSwitchAccount != null)
-            TextButton.icon(
-              style: TextButton.styleFrom(foregroundColor: Colors.white),
-              onPressed: widget.onSwitchAccount,
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('Ganti Akun'),
-            ),
-        ],
+      backgroundColor: WarehouseColors.background,
+      appBar: WarehouseAppBar(
+        subtitle:
+            'Halo, ${widget.activeUserName ?? 'Kepala Gudang'} · ${widget.activeRoleLabel ?? 'manager'}',
+        onSwitchAccount: widget.onSwitchAccount,
       ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 920),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: WarehousePageHeader(
+                    title: 'Beranda gudang',
+                    subtitle: 'Kelola master barang & pantau stok gudang',
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                   child: ManagerSummaryHeader(
                     userName: widget.activeUserName,
                     roleLabel: widget.activeRoleLabel,
@@ -243,51 +367,119 @@ class _ManagerInventoryViewState extends State<ManagerInventoryView> {
                   ),
                 ),
                 if (_statusMessage != null)
-                  ManagerStatusBanner(
-                    message: _statusMessage!,
-                    isError: _isErrorStatus,
-                    onDismiss: () => setState(() => _statusMessage = null),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: ManagerStatusBanner(
+                      message: _statusMessage!,
+                      isError: _isErrorStatus,
+                      onDismiss: () => setState(() => _statusMessage = null),
+                    ),
                   ),
-                Expanded(child: _buildBody()),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: WarehouseSearchField(
+                    onChanged: (value) => setState(() => _searchQuery = value),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: WarehouseSectionHeader(
+                    title: 'Daftar barang',
+                    trailing: '${filteredItems.length} barang',
+                  ),
+                ),
+                Expanded(child: _buildBody(filteredItems)),
               ],
             ),
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddDialog,
-        icon: const Icon(Icons.add),
-        label: const Text('Tambah Barang'),
-        backgroundColor: _canCreate ? _primaryTeal : Colors.grey,
-        foregroundColor: Colors.white,
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: WarehousePrimaryButton(
+            label: 'Tambah barang',
+            icon: Icons.add,
+            onPressed: _openAddDialog,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(List<ManagerItem> items) {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(color: _primaryTeal),
+        child: CircularProgressIndicator(color: WarehouseColors.primaryTeal),
       );
     }
     if (_items.isEmpty) {
       return const Center(child: Text('Tidak ada data barang tersedia.'));
     }
+    if (items.isEmpty) {
+      return const Center(
+        child: Text(
+          'Tidak ada barang yang cocok dengan pencarian.',
+          style: TextStyle(color: WarehouseColors.subtitleText),
+        ),
+      );
+    }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
-      itemCount: _items.length,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
-        final item = _items[index];
+        final item = items[index];
         return ManagerItemCard(
           item: item,
           canEdit: _canCreate,
           canDelete: _canDelete,
-          onEdit: () => _openEditDialog(item),
-          onAdjustStock: () => _openAdjustDialog(item),
-          onDelete: () => _confirmDelete(item),
+          onOpenDetails: () => _openItemActions(item),
         );
       },
+    );
+  }
+}
+
+/// Dialog konfirmasi hapus bergaya Figma (putih membulat, tombol merah).
+class _WarehouseConfirmDialog extends StatelessWidget {
+  const _WarehouseConfirmDialog({required this.item});
+
+  final ManagerItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: const Text(
+        'Konfirmasi Hapus',
+        style: TextStyle(
+          color: WarehouseColors.primaryTeal,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      content: Text('Apakah barang ${item.sku} ingin dihapus?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text(
+            'Batal',
+            style: TextStyle(color: WarehouseColors.primaryTeal),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: WarehouseColors.dangerRed,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Hapus'),
+        ),
+      ],
     );
   }
 }

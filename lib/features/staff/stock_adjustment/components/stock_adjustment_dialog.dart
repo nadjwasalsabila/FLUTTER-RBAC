@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../common/warehouse_theme.dart';
 import '../types/stock_models.dart';
 import 'stock_dialog_parts.dart';
 
@@ -15,6 +16,8 @@ class StockAdjustmentInput {
   final String reason;
 }
 
+/// Dialog ubah stok gaya Figma: banner barang, chip jenis perubahan,
+/// field bergaris lembut, tombol amber "Simpan perubahan".
 class StockAdjustmentDialog extends StatefulWidget {
   const StockAdjustmentDialog({super.key, required this.item});
 
@@ -35,9 +38,6 @@ class StockAdjustmentDialog extends StatefulWidget {
 }
 
 class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _darkText = Color(0xFF102A2A);
   static const _presetReasons = [
     'Barang masuk',
     'Barang keluar',
@@ -79,14 +79,51 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
     );
   }
 
+  InputDecoration _decoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(
+        color: WarehouseColors.subtitleText,
+        fontSize: 13,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      filled: true,
+      fillColor: WarehouseColors.background,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: WarehouseColors.softMint),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: WarehouseColors.primaryTeal),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: WarehouseColors.dangerRed),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: WarehouseColors.dangerRed),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: const Text(
         'Ubah Stok Barang',
-        style: TextStyle(color: _primaryTeal, fontWeight: FontWeight.w700),
+        style: TextStyle(
+          color: WarehouseColors.darkText,
+          fontWeight: FontWeight.w800,
+          fontSize: 18,
+        ),
       ),
       content: SingleChildScrollView(
         child: Form(
@@ -105,10 +142,7 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
               TextFormField(
                 controller: _amountController,
                 keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'Jumlah perubahan',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
+                decoration: _decoration('Jumlah perubahan'),
                 validator: (value) {
                   final parsed = int.tryParse(value?.trim() ?? '');
                   if (parsed == null || parsed <= 0) {
@@ -124,10 +158,18 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
                 children: _presetReasons
                     .map(
                       (reason) => ActionChip(
-                        backgroundColor: _softMint,
+                        backgroundColor: WarehouseColors.paleMint,
                         side: BorderSide.none,
-                        label: Text(reason, style: const TextStyle(color: _darkText, fontSize: 12)),
-                        onPressed: () => setState(() => _reasonController.text = reason),
+                        label: Text(
+                          reason,
+                          style: const TextStyle(
+                            color: WarehouseColors.primaryTeal,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        onPressed: () =>
+                            setState(() => _reasonController.text = reason),
                       ),
                     )
                     .toList(),
@@ -135,31 +177,44 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _reasonController,
-                decoration: InputDecoration(
-                  labelText: 'Alasan perubahan',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Alasan perubahan wajib diisi.'
-                    : null,
+                decoration: _decoration('Alasan perubahan'),
+                validator: (value) =>
+                    (value == null || value.trim().isEmpty)
+                        ? 'Alasan perubahan wajib diisi.'
+                        : null,
               ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Batal', style: TextStyle(color: _primaryTeal)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: WarehouseColors.primaryTeal,
+            side: const BorderSide(color: WarehouseColors.softMint),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            minimumSize: const Size(96, 44),
+          ),
+          child: const Text('Batal'),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: _primaryTeal,
+            backgroundColor: WarehouseColors.warmAmber,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            minimumSize: const Size(140, 44),
           ),
           onPressed: _submit,
-          child: const Text('Simpan'),
+          child: const Text(
+            'Simpan perubahan',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
         ),
       ],
     );

@@ -89,10 +89,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Sepatu Safety Steel Toe'), findsOneWidget);
-    expect(find.text('SKU-1001'), findsOneWidget);
-    expect(find.text('Stok: 10'), findsOneWidget);
+    expect(find.textContaining('SKU-1001'), findsOneWidget);
+    expect(find.text('10 unit'), findsOneWidget);
 
-    await tester.tap(find.text('Ubah Stok').last);
+    // Buka lembar detail barang dari kartu, lalu tekan "Ubah stok".
+    await tester.tap(find.text('Sepatu Safety Steel Toe'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ubah stok'));
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -101,11 +104,11 @@ void main() {
     );
     await tester.tap(find.text('Koreksi stok'));
     await tester.pump();
-    await tester.tap(find.text('Simpan'));
+    await tester.tap(find.text('Simpan perubahan'));
     await tester.pumpAndSettle();
 
     expect(find.text('Stok berhasil diperbarui.'), findsWidgets);
-    expect(find.text('Stok: 14'), findsOneWidget);
+    expect(find.text('14 unit'), findsOneWidget);
   });
 
   testWidgets('StaffInventoryView shows exact denial message when permission missing', (
@@ -128,9 +131,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Ubah Stok').first);
+    // Buka lembar detail barang dari kartu, lalu tekan "Ubah stok";
+    // penolakan izin tetap muncul saat dialog disimpan.
+    await tester.tap(find.text('Sepatu Safety Steel Toe'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Simpan'));
+    await tester.tap(find.text('Ubah stok'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Simpan perubahan'));
     await tester.pumpAndSettle();
 
     expect(
