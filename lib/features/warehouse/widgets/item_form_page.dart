@@ -1,24 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../../manager/item_management/types/manager_models.dart';
-import 'flow_widgets.dart';
+import '../../../core/widgets/flow_widgets.dart';
+import '../models/warehouse_models.dart';
 
-/// Formulir "Tambah barang" layar penuh sesuai mockup:
-/// judul besar, field putih berlabel (SKU, Nama, Kategori, Lokasi,
-/// Satuan, Batas stok minimum, Stok awal) dan tombol amber
-/// "Simpan barang". Setelah simpan → layar sukses.
+/// Formulir "Tambah barang" layar penuh.
 class ItemFormPage extends StatefulWidget {
   const ItemFormPage({super.key, this.initial});
 
-  final ManagerItem? initial;
+  final WarehouseItem? initial;
 
-  static Future<ManagerItemInput?> show(
+  static Future<WarehouseItemInput?> show(
     BuildContext context, {
-    ManagerItem? initial,
+    WarehouseItem? initial,
   }) {
     return Navigator.of(context).push(
-      MaterialPageRoute<ManagerItemInput>(
+      MaterialPageRoute<WarehouseItemInput>(
         builder: (_) => ItemFormPage(initial: initial),
       ),
     );
@@ -64,14 +61,13 @@ class _ItemFormPageState extends State<ItemFormPage> {
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     Navigator.of(context).pop(
-      ManagerItemInput(
+      WarehouseItemInput(
         sku: _skuController.text,
         name: _nameController.text,
         category: _categoryController.text,
         location: _locationController.text,
         satuan: _satuanController.text,
         minStock: int.parse(_minStockController.text.trim()),
-        // Saat edit, stok tidak diedit — nilai awal dipertahankan.
         stock: _isEditMode
             ? widget.initial!.stock
             : int.parse(_stockController.text.trim()),
@@ -79,9 +75,7 @@ class _ItemFormPageState extends State<ItemFormPage> {
     );
   }
 
-  InputDecoration get _fieldDecoration => const InputDecoration(
-        hintText: '—',
-      );
+  InputDecoration get _fieldDecoration => const InputDecoration(hintText: '—');
 
   @override
   Widget build(BuildContext context) {
@@ -99,7 +93,6 @@ class _ItemFormPageState extends State<ItemFormPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
                 children: [
-                  // Judul besar sesuai mockup
                   Text(
                     _isEditMode ? 'Ubah Data Barang' : 'Tambah barang',
                     style: const TextStyle(
@@ -214,8 +207,6 @@ class _ItemFormPageState extends State<ItemFormPage> {
                       },
                     ),
                   ),
-                  // Saat edit, stok disembunyikan: perubahan stok hanya
-                  // boleh lewat alur "Ubah Stok" agar tercatat di riwayat.
                   if (!_isEditMode) ...[
                     const SizedBox(height: 16),
                     FlowField(

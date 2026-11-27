@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/app_theme.dart';
+import '../app_theme.dart';
 
-/// Komponen UI alur (form barang & ubah stok) sesuai mockup:
+/// Komponen UI alur (form barang, autentikasi, & ubah stok):
 /// field putih dengan label di atas, tombol amber pill besar,
 /// dan layar sukses hijau dengan angka besar di tengah.
 

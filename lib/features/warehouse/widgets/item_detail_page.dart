@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../../manager/item_management/types/manager_models.dart';
-import '../stock_movement_service.dart';
-import 'flow_widgets.dart';
+import '../../../core/widgets/flow_widgets.dart';
+import '../models/warehouse_models.dart';
+import '../services/stock_movement_service.dart';
 
-/// Halaman detail barang sesuai mockup: judul besar nama barang,
-/// kartu teal gelap dengan stok besar + kotak "Tersedia",
-/// baris info putih, catatan mint, dan tombol amber di bawah.
+/// Halaman detail barang: menampilkan info stok, riwayat pergerakan,
+/// tombol Hapus (jika `canDelete`), dan tombol Ubah Barang / Ubah Stok
+/// (jika `canEdit || canAdjustStock`).
 class ItemDetailPage extends StatefulWidget {
   const ItemDetailPage({
     super.key,
@@ -20,23 +20,23 @@ class ItemDetailPage extends StatefulWidget {
     this.onDelete,
   });
 
-  final ManagerItem item;
+  final WarehouseItem item;
   final StockMovementService movementService;
   final bool canEdit;
   final bool canDelete;
   final bool canAdjustStock;
   final VoidCallback? onEdit;
-  final VoidCallback? onDelete;
+  final Future<bool> Function()? onDelete;
 
   static Future<void> push(
     BuildContext context, {
-    required ManagerItem item,
+    required WarehouseItem item,
     required StockMovementService movementService,
     bool canEdit = false,
     bool canDelete = false,
     bool canAdjustStock = false,
     VoidCallback? onEdit,
-    VoidCallback? onDelete,
+    Future<bool> Function()? onDelete,
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
@@ -59,24 +59,24 @@ class ItemDetailPage extends StatefulWidget {
 
 class _ItemDetailPageState extends State<ItemDetailPage> {
   late Future<List<StockMovement>> _movementsFuture;
-  late ManagerItem _item;
 
   @override
   void initState() {
     super.initState();
-    _item = widget.item;
-    _movementsFuture = widget.movementService.getMovements(_item.id);
+    _movementsFuture = widget.movementService.getMovements(widget.item.id);
   }
 
-  void _runAction(VoidCallback? action) {
-    if (action == null) return;
-    action();
+  Future<void> _handleDelete() async {
+    final deleted = await widget.onDelete?.call() ?? false;
+    if (deleted && mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final item = _item;
-    final isLowStock = item.stock <= item.minStock;
+    final item = widget.item;
+    final isLowStock = item.isLowStock;
 
     return Scaffold(
       backgroundColor: AppColors.paleMint,
@@ -89,7 +89,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         actions: [
           if (widget.canDelete)
             IconButton(
-              onPressed: () => _runAction(widget.onDelete),
+              onPressed: _handleDelete,
               icon: const Icon(Icons.delete_outline),
               tooltip: 'Hapus barang',
             ),
@@ -102,7 +102,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
-                // Judul besar: nama barang + SKU · kategori
                 Text(
                   item.name,
                   style: const TextStyle(
@@ -120,18 +119,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Kartu teal gelap: ikon kotak, "Stok saat ini",
-                // stok besar "120 rim", kotak status "Tersedia".
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF1B6B63),
-                        Color(0xFF145858),
-                      ],
+                      colors: [Color(0xFF1B6B63), Color(0xFF145858)],
                     ),
                     borderRadius: BorderRadius.circular(24),
                   ),
@@ -146,10 +140,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       const SizedBox(height: 10),
                       const Text(
                         'Stok saat ini',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white70,
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.white70),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -185,7 +176,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                // Info putih: Lokasi penyimpanan / Satuan / Batas stok minimum.
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
@@ -207,7 +197,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                // Catatan mint.
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(
@@ -220,10 +209,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   ),
                   child: const Text(
                     'Periksa jumlah fisik barang sebelum memperbarui stok.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.darkText,
-                    ),
+                    style: TextStyle(fontSize: 12, color: AppColors.darkText),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -234,13 +220,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           ),
         ),
       ),
-      // SATU tombol amber di bawah: buka layar Ubah Barang / Ubah Stok.
       bottomNavigationBar: (widget.canEdit || widget.canAdjustStock)
           ? SafeArea(
               minimum: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: AmberButton(
                 label: widget.canEdit ? 'Ubah Barang' : 'Ubah Stok',
-                onTap: () => _runAction(widget.onEdit),
+                onTap: () => widget.onEdit?.call(),
               ),
             )
           : null,
@@ -255,10 +240,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.textMuted,
-              ),
+              style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
             ),
           ),
           Text(

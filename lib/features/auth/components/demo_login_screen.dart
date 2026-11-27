@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../../shared/flow/flow_widgets.dart';
+import '../../../core/widgets/flow_widgets.dart';
 import '../state/auth_state.dart';
 import '../types/auth_user.dart';
 import 'register_screen.dart';
@@ -54,22 +54,6 @@ class _DemoLoginScreenState extends State<DemoLoginScreen> {
       _passwordController.text = AuthState.demoPassword;
       _inlineError = null;
     });
-  }
-
-  /// Chip demo langsung login — tidak perlu menekan "Masuk" dua kali.
-  Future<void> _loginAsDemoUser(AuthUser demoUser) async {
-    if (_isSubmitting) return;
-    setState(() {
-      _isSubmitting = true;
-      _inlineError = null;
-    });
-    final loggedIn = await widget.authState.loginWithCredentials(
-      demoUser.username,
-      AuthState.demoPassword,
-    );
-    if (!mounted) return;
-    setState(() => _isSubmitting = false);
-    if (loggedIn != null) widget.onUserSelected?.call(loggedIn);
   }
 
   Future<void> _submitLogin() async {
@@ -246,26 +230,29 @@ class _DemoLoginScreenState extends State<DemoLoginScreen> {
             runSpacing: 8,
             alignment: WrapAlignment.center,
             children: widget.authState.users.map((user) {
+              final isSelected =
+                  _emailController.text.trim().toLowerCase() ==
+                  user.username.toLowerCase();
               return ActionChip(
-                avatar: const Icon(
-                  Icons.login_rounded,
+                avatar: Icon(
+                  isSelected ? Icons.check_circle : Icons.person_outline,
                   size: 16,
-                  color: AppColors.primaryTeal,
+                  color: isSelected ? Colors.white : AppColors.primaryTeal,
                 ),
-                backgroundColor: AppColors.surface,
-                side: const BorderSide(color: AppColors.border),
+                backgroundColor:
+                    isSelected ? AppColors.primaryTeal : AppColors.surface,
+                side: BorderSide(
+                  color: isSelected ? AppColors.primaryTeal : AppColors.border,
+                ),
                 label: Text(
                   '${user.fullName} · ${user.roleId}',
-                  style: const TextStyle(
-                    color: AppColors.darkText,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : AppColors.darkText,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
                 ),
-                onPressed: () {
-                  _fillDemoCredentials(user);
-                  _loginAsDemoUser(user);
-                },
+                onPressed: () => _fillDemoCredentials(user),
               );
             }).toList(),
           ),

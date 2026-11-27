@@ -1,35 +1,30 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../types/manager_models.dart';
+import '../../../core/rbac/permission_service.dart';
+import '../models/warehouse_models.dart';
 
-class ManagerItemService {
-  ManagerItemService(
+/// Service CRUD master barang dengan validasi izin RBAC di layer bisnis.
+class ItemService {
+  ItemService(
     this._db,
     this._checkPermission, {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
-  static const String readPermission = 'item:read';
-  static const String createPermission = 'item:create';
-  static const String deletePermission = 'item:delete';
-  static const String readDeniedMessage =
+  static const readDeniedMessage =
       'Akses ditolak: Anda tidak memiliki izin item:read.';
-  static const String createDeniedMessage =
+  static const createDeniedMessage =
       'Akses ditolak: Anda tidak memiliki izin item:create.';
-  static const String deleteDeniedMessage =
+  static const deleteDeniedMessage =
       'Akses ditolak: Anda tidak memiliki izin item:delete.';
 
   final Database _db;
-  final ManagerPermissionChecker _checkPermission;
+  final PermissionChecker _checkPermission;
   final DateTime Function() _now;
 
-  Future<bool> hasPermission(String permissionKey) =>
-      _checkPermission(permissionKey);
-
-  Future<ManagerItemsResult> getItems() async {
-    final allowed = await _checkPermission(readPermission);
-    if (!allowed) {
-      return const ManagerItemsResult(
+  Future<ItemsQueryResult> getItems() async {
+    if (!await _checkPermission(AppPermissions.itemRead)) {
+      return const ItemsQueryResult(
         allowed: false,
         items: [],
         errorMessage: readDeniedMessage,
@@ -51,19 +46,18 @@ class ManagerItemService {
       ],
       orderBy: 'sku ASC',
     );
-    return ManagerItemsResult(
+    return ItemsQueryResult(
       allowed: true,
-      items: rows.map(ManagerItem.fromMap).toList(),
+      items: rows.map(WarehouseItem.fromMap).toList(),
     );
   }
 
-  Future<ManagerItemResult> addItem(
-    ManagerItemInput input, {
+  Future<ItemActionResult> addItem(
+    WarehouseItemInput input, {
     required int userId,
   }) async {
-    final allowed = await _checkPermission(createPermission);
-    if (!allowed) {
-      return ManagerItemResult.denied(createDeniedMessage);
+    if (!await _checkPermission(AppPermissions.itemCreate)) {
+      return ItemActionResult.denied(createDeniedMessage);
     }
 
     final sku = input.sku.trim();
@@ -71,18 +65,15 @@ class ManagerItemService {
     final category = input.category.trim();
     final location = input.location.trim();
 
-    if (sku.isEmpty ||
-        name.isEmpty ||
-        category.isEmpty ||
-        location.isEmpty) {
-      return const ManagerItemResult(
+    if (sku.isEmpty || name.isEmpty || category.isEmpty || location.isEmpty) {
+      return const ItemActionResult(
         success: false,
         message: 'Semua input wajib diisi.',
       );
     }
 
     if (input.stock < 0) {
-      return const ManagerItemResult(
+      return const ItemActionResult(
         success: false,
         message: 'Stok awal tidak boleh negatif.',
       );
@@ -96,7 +87,7 @@ class ManagerItemService {
       limit: 1,
     );
     if (existing.isNotEmpty) {
-      return ManagerItemResult(
+      return ItemActionResult(
         success: false,
         message: 'SKU $sku sudah digunakan oleh barang lain.',
       );
@@ -104,53 +95,49 @@ class ManagerItemService {
 
     final timestamp = _now().toIso8601String();
     try {
-      final itemId = await _db.insert('warehouse_items', {
-        'sku': sku,
-        'name': name,
-        'category': category,
-        'location': location,
-        'stock': input.stock,
-        'satuan': input.satuan.trim().isEmpty ? 'unit' : input.satuan.trim(),
-        'min_stock': input.minStock < 0 ? 0 : input.minStock,
-        'updated_at': timestamp,
+      await _db.transaction((txn) async {
+        final itemId = await txn.insert('warehouse_items', {
+          'sku': sku,
+          'name': name,
+          'category': category,
+          'location': location,
+          'stock': input.stock,
+          'satuan': input.satuan.trim().isEmpty ? 'unit' : input.satuan.trim(),
+          'min_stock': input.minStock < 0 ? 0 : input.minStock,
+          'updated_at': timestamp,
+        });
+
+        if (input.stock != 0) {
+          await txn.insert('stock_movements', {
+            'item_id': itemId,
+            'user_id': userId,
+            'delta': input.stock,
+            'reason': 'Stok awal',
+            'created_at': timestamp,
+          });
+        }
       });
 
-      // Catat stok awal ke riwayat pergerakan agar konsisten dengan
-      // perubahan stok yang dilakukan staff/manager.
-      if (input.stock != 0) {
-        await _db.insert('stock_movements', {
-          'item_id': itemId,
-          'user_id': userId,
-          'delta': input.stock,
-          'reason': 'Stok awal',
-          'created_at': timestamp,
-        });
-      }
-
-      return ManagerItemResult(
+      return ItemActionResult(
         success: true,
         message: 'Barang $sku berhasil ditambahkan.',
       );
     } on DatabaseException {
-      return const ManagerItemResult(
+      return const ItemActionResult(
         success: false,
         message: 'Gagal menyimpan barang ke database.',
       );
     }
   }
 
-  /// Mengubah data barang (SKU, nama, kategori, lokasi).
-  /// Stok TIDAK diubah di sini — perubahan stok harus melalui
-  /// [StockAdjustmentService.adjustStock] agar tercatat di stock_movements.
-  /// Memakai izin item:create (pembuat barang boleh mengubah datanya).
-  Future<ManagerItemResult> updateItem({
+  /// Mengubah data barang (tanpa mengubah stok; stok melalui StockAdjustmentService).
+  Future<ItemActionResult> updateItem({
     required int itemId,
     required String currentSku,
-    required ManagerItemInput input,
+    required WarehouseItemInput input,
   }) async {
-    final allowed = await _checkPermission(createPermission);
-    if (!allowed) {
-      return ManagerItemResult.denied(createDeniedMessage);
+    if (!await _checkPermission(AppPermissions.itemCreate)) {
+      return ItemActionResult.denied(createDeniedMessage);
     }
 
     final sku = input.sku.trim();
@@ -158,11 +145,8 @@ class ManagerItemService {
     final category = input.category.trim();
     final location = input.location.trim();
 
-    if (sku.isEmpty ||
-        name.isEmpty ||
-        category.isEmpty ||
-        location.isEmpty) {
-      return const ManagerItemResult(
+    if (sku.isEmpty || name.isEmpty || category.isEmpty || location.isEmpty) {
+      return const ItemActionResult(
         success: false,
         message: 'Semua input wajib diisi.',
       );
@@ -176,7 +160,7 @@ class ManagerItemService {
       limit: 1,
     );
     if (duplicate.isNotEmpty) {
-      return ManagerItemResult(
+      return ItemActionResult(
         success: false,
         message: 'SKU $sku sudah digunakan oleh barang lain.',
       );
@@ -197,38 +181,45 @@ class ManagerItemService {
         where: 'id = ?',
         whereArgs: [itemId],
       );
-      return ManagerItemResult(
+      return ItemActionResult(
         success: true,
         message: currentSku == sku
             ? 'Barang $sku berhasil diperbarui.'
             : 'Barang $currentSku berhasil diperbarui menjadi $sku.',
       );
     } on DatabaseException {
-      return const ManagerItemResult(
+      return const ItemActionResult(
         success: false,
         message: 'Gagal memperbarui barang di database.',
       );
     }
   }
 
-  Future<ManagerItemResult> deleteItem(int itemId, String sku) async {
-    final allowed = await _checkPermission(deletePermission);
-    if (!allowed) {
-      return ManagerItemResult.denied(deleteDeniedMessage);
+  Future<ItemActionResult> deleteItem(int itemId, String sku) async {
+    if (!await _checkPermission(AppPermissions.itemDelete)) {
+      return ItemActionResult.denied(deleteDeniedMessage);
     }
 
     try {
-      await _db.delete(
-        'warehouse_items',
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-      return ManagerItemResult(
+      await _db.transaction((txn) async {
+        // Hapus riwayat pergerakan terkait terlebih dahulu agar FK RESTRICT tidak gagal.
+        await txn.delete(
+          'stock_movements',
+          where: 'item_id = ?',
+          whereArgs: [itemId],
+        );
+        await txn.delete(
+          'warehouse_items',
+          where: 'id = ?',
+          whereArgs: [itemId],
+        );
+      });
+      return ItemActionResult(
         success: true,
         message: 'Barang $sku berhasil dihapus.',
       );
     } on DatabaseException {
-      return const ManagerItemResult(
+      return const ItemActionResult(
         success: false,
         message: 'Gagal menghapus barang dari database.',
       );

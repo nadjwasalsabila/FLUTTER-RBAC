@@ -1,16 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../../manager/item_management/types/manager_models.dart';
-import '../../staff/stock_adjustment/types/stock_models.dart';
-import 'flow_widgets.dart';
+import '../../../core/widgets/flow_widgets.dart';
+import '../models/warehouse_models.dart';
 
-/// SATU layar gabungan untuk mengubah barang: data (SKU, nama, kategori,
-/// lokasi, satuan, batas stok minimum) DAN stok (masuk/keluar, jumlah,
-/// alasan) dalam satu alur: Form → Konfirmasi → Layar sukses.
-///
-/// - Role dengan izin edit data: semua field aktif.
-/// - Role hanya boleh ubah stok (mis. staff): hanya bagian stok.
+/// SATU layar gabungan untuk mengubah barang: data DAN/ATAU stok
+/// sesuai izin aktif (`canEditData`, `canAdjustStock`).
 class ItemEditPage extends StatefulWidget {
   const ItemEditPage({
     super.key,
@@ -21,28 +16,22 @@ class ItemEditPage extends StatefulWidget {
     required this.adjustStock,
   });
 
-  final ManagerItem item;
+  final WarehouseItem item;
   final bool canEditData;
   final bool canAdjustStock;
-
-  /// Simpan perubahan DATA barang (SKU, nama, dst).
-  final Future<ManagerItemResult> Function(ManagerItemInput input) saveData;
-
-  /// Simpan perubahan STOK (tercatat di riwayat pergerakan).
-  final Future<StockAdjustmentResult> Function(
-    StockAdjustmentInput input,
-  ) adjustStock;
+  final Future<ItemActionResult> Function(WarehouseItemInput input) saveData;
+  final Future<StockAdjustmentResult> Function(StockAdjustmentInput input)
+      adjustStock;
 
   static Future<void> push(
     BuildContext context, {
-    required ManagerItem item,
+    required WarehouseItem item,
     required bool canEditData,
     required bool canAdjustStock,
-    required Future<ManagerItemResult> Function(ManagerItemInput input)
+    required Future<ItemActionResult> Function(WarehouseItemInput input)
         saveData,
-    required Future<StockAdjustmentResult> Function(
-      StockAdjustmentInput input,
-    ) adjustStock,
+    required Future<StockAdjustmentResult> Function(StockAdjustmentInput input)
+        adjustStock,
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
@@ -61,27 +50,11 @@ class ItemEditPage extends StatefulWidget {
   State<ItemEditPage> createState() => _ItemEditPageState();
 }
 
-/// Nilai perubahan stok yang sudah tervalidasi.
-class StockAdjustmentInput {
-  const StockAdjustmentInput({
-    required this.type,
-    required this.amount,
-    required this.reason,
-  });
-
-  final StockAdjustmentType type;
-  final int amount;
-  final String reason;
-}
-
 class _ItemEditPageState extends State<ItemEditPage> {
   final _formKey = GlobalKey<FormState>();
 
-  // Controller data barang
-  late final _skuController =
-      TextEditingController(text: widget.item.sku);
-  late final _nameController =
-      TextEditingController(text: widget.item.name);
+  late final _skuController = TextEditingController(text: widget.item.sku);
+  late final _nameController = TextEditingController(text: widget.item.name);
   late final _categoryController =
       TextEditingController(text: widget.item.category);
   late final _locationController =
@@ -91,15 +64,10 @@ class _ItemEditPageState extends State<ItemEditPage> {
   late final _minStockController =
       TextEditingController(text: '${widget.item.minStock}');
 
-  // Controller stok — berisi JUMLAH STOK yang diinginkan (angka final).
-  // Tombol +/- menambah/mengurangi dari stok yang sudah ada; jenis
-  // perubahan (masuk/keluar) otomatis dari selisihnya.
   late final _amountController =
       TextEditingController(text: '${widget.item.stock}');
   final _reasonController = TextEditingController(text: 'Barang masuk');
 
-  /// Apakah perubahan stok disertakan dalam penyimpanan ini.
-  /// Untuk role tanpa izin edit data (mis. staff), stok selalu disertakan.
   bool get _stockIncluded => _stockIncludedFlag || !widget.canEditData;
   bool _stockIncludedFlag = false;
   bool _isSubmitting = false;
@@ -117,9 +85,7 @@ class _ItemEditPageState extends State<ItemEditPage> {
     super.dispose();
   }
 
-  // ----- Deteksi perubahan -----
-
-  ManagerItemInput get _currentInput => ManagerItemInput(
+  WarehouseItemInput get _currentInput => WarehouseItemInput(
         sku: _skuController.text,
         name: _nameController.text,
         category: _categoryController.text,
@@ -139,22 +105,14 @@ class _ItemEditPageState extends State<ItemEditPage> {
         (int.tryParse(_minStockController.text.trim()) ?? -1) != i.minStock;
   }
 
-  /// Jumlah stok baru yang diinginkan (dari field / tombol +/-).
   int get _newStock => int.tryParse(_amountController.text.trim()) ?? 0;
-
-  /// Selisih terhadap stok saat ini: positif = masuk, negatif = keluar.
   int get _stockDelta => _newStock - widget.item.stock;
-
   int get _nextStock => _newStock;
 
   bool get _hasAnyChange =>
       (widget.canEditData && _dataChanged) ||
       (widget.canAdjustStock && _stockIncluded);
 
-  // ----- Aksi -----
-
-  /// Tombol +/- di samping field jumlah: tambah/kurangi dari jumlah
-  /// stok yang sudah ada, satu-satu.
   void _stepAmount(int step) {
     final current = int.tryParse(_amountController.text.trim()) ?? 0;
     final next = (current + step).clamp(0, 1000000);
@@ -163,8 +121,6 @@ class _ItemEditPageState extends State<ItemEditPage> {
     setState(() {});
   }
 
-  /// Ikuti perubahan default alasan mengikuti arah selisih stok
-  /// (hanya bila user belum mengubah alasan secara manual).
   void _syncDefaultReason(int delta) {
     final t = _reasonController.text.trim();
     if (t == 'Barang masuk' || t == 'Barang keluar') {
@@ -216,8 +172,6 @@ class _ItemEditPageState extends State<ItemEditPage> {
     if (wantStock) {
       final result = await widget.adjustStock(
         StockAdjustmentInput(
-          // Jenis perubahan otomatis dari selisih stok baru vs saat ini:
-          // bertambah = masuk, berkurang = keluar.
           type: _stockDelta >= 0
               ? StockAdjustmentType.increase
               : StockAdjustmentType.decrease,
@@ -234,8 +188,6 @@ class _ItemEditPageState extends State<ItemEditPage> {
     if (!mounted) return;
     setState(() => _isSubmitting = false);
 
-    // Buang form + konfirmasi, lalu tampilkan layar sukses
-    // (hijau, ikon centang besar, angka stok besar — sesuai mockup).
     Navigator.of(context)
       ..pop()
       ..pop();
@@ -246,9 +198,7 @@ class _ItemEditPageState extends State<ItemEditPage> {
           message: wantData
               ? 'Data ${_nameController.text.trim()} berhasil diperbarui.'
               : 'Stok ${widget.item.name} berhasil diperbarui.',
-          bigValue: wantStock
-              ? '$_nextStock'
-              : null,
+          bigValue: wantStock ? '$_nextStock' : null,
           bigValueLabel: wantStock ? widget.item.satuan : null,
           buttonLabel: 'Kembali ke daftar',
         ),
@@ -263,8 +213,6 @@ class _ItemEditPageState extends State<ItemEditPage> {
       SnackBar(content: Text(message), backgroundColor: AppColors.errorRed),
     );
   }
-
-  // ----- UI -----
 
   @override
   Widget build(BuildContext context) {
@@ -282,10 +230,9 @@ class _ItemEditPageState extends State<ItemEditPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
                 children: [
-                  // Judul besar sesuai mockup
-                  Text(
+                  const Text(
                     'Ubah barang',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w800,
                       color: AppColors.darkText,
@@ -377,7 +324,7 @@ class _ItemEditPageState extends State<ItemEditPage> {
                     if (widget.canEditData)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        activeColor: AppColors.primaryTeal,
+                        activeThumbColor: AppColors.primaryTeal,
                         title: const Text(
                           'Ubah stok juga',
                           style: TextStyle(
@@ -418,7 +365,7 @@ class _ItemEditPageState extends State<ItemEditPage> {
                                   helperText:
                                       'Stok masuk (+) atau keluar (−) dari jumlah ini',
                                 ),
-                                onChanged: (v) =>
+                                onChanged: (_) =>
                                     _syncDefaultReason(_stockDelta),
                                 validator: (v) {
                                   final parsed = int.tryParse(v?.trim() ?? '');
@@ -512,7 +459,6 @@ class _ItemEditPageState extends State<ItemEditPage> {
   }
 }
 
-/// Tombol bulat +/- di samping field jumlah perubahan.
 class _StepButton extends StatelessWidget {
   const _StepButton({required this.icon, required this.onTap});
 
@@ -537,7 +483,6 @@ class _StepButton extends StatelessWidget {
   }
 }
 
-/// Layar "Konfirmasi" — tinjauan SEMUA perubahan (data + stok).
 class _EditConfirmPage extends StatelessWidget {
   const _EditConfirmPage({
     required this.item,
@@ -549,8 +494,8 @@ class _EditConfirmPage extends StatelessWidget {
     required this.reason,
   });
 
-  final ManagerItem item;
-  final ManagerItemInput newData;
+  final WarehouseItem item;
+  final WarehouseItemInput newData;
   final bool dataChanged;
   final bool stockIncluded;
   final int stockDelta;
@@ -569,9 +514,9 @@ class _EditConfirmPage extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
               children: [
-                Text(
+                const Text(
                   'Konfirmasi',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w800,
                     color: AppColors.darkText,
@@ -609,12 +554,21 @@ class _EditConfirmPage extends StatelessWidget {
                         _changeRow('SKU', item.sku, newData.sku.trim()),
                         _changeRow('Nama', item.name, newData.name.trim()),
                         _changeRow(
-                            'Kategori', item.category, newData.category.trim()),
+                          'Kategori',
+                          item.category,
+                          newData.category.trim(),
+                        ),
                         _changeRow(
-                            'Lokasi', item.location, newData.location.trim()),
+                          'Lokasi',
+                          item.location,
+                          newData.location.trim(),
+                        ),
                         _changeRow('Satuan', item.satuan, newData.satuan.trim()),
-                        _changeRow('Batas stok minimum',
-                            '${item.minStock}', '${newData.minStock}'),
+                        _changeRow(
+                          'Batas stok minimum',
+                          '${item.minStock}',
+                          '${newData.minStock}',
+                        ),
                         const SizedBox(height: 12),
                       ],
                       if (stockIncluded)
@@ -705,7 +659,6 @@ class _EditConfirmPage extends StatelessWidget {
     );
   }
 
-  /// Baris perubahan data: lama → baru (disembunyikan bila sama).
   Widget _changeRow(String label, String oldV, String newV) {
     if (oldV == newV) return const SizedBox.shrink();
     return Padding(
