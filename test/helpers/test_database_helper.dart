@@ -1,5 +1,5 @@
+import 'package:rbac/core/rbac/permission_service.dart';
 import 'package:rbac/features/auth/auth.dart';
-import 'package:rbac/features/staff/stock_adjustment/stock_adjustment.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 Future<Database> openTestWarehouseDb() async {
@@ -126,6 +126,7 @@ Future<void> _seedBaseData(Database db) async {
       await db.insert('role_permissions', {
         'role_id': entry.key,
         'permission_key': perm,
+        'is_active': 1,
       });
     }
   }
@@ -156,21 +157,6 @@ Future<void> _seedBaseData(Database db) async {
   });
 }
 
-StaffPermissionChecker buildDbPermissionChecker(Database db, String roleId) {
-  return (String permissionKey) async {
-    final rows = await db.query(
-      'role_permissions',
-      columns: const ['permission_key'],
-      where: 'role_id = ? AND permission_key = ?',
-      whereArgs: [roleId, permissionKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
-      return StockPermissionDecision(
-        allowed: false,
-        missingPermission: permissionKey,
-      );
-    }
-    return const StockPermissionDecision(allowed: true);
-  };
+PermissionChecker buildDbPermissionChecker(Database db, String roleId) {
+  return PermissionService(db).checkerForRole(roleId);
 }

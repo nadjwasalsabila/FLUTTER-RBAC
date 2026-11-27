@@ -1,7 +1,9 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../types/stock_models.dart';
+import '../../../core/rbac/permission_service.dart';
+import '../models/warehouse_models.dart';
 
+/// Service penyesuaian stok transaksional (update stok + catat stock_movements).
 class StockAdjustmentService {
   StockAdjustmentService(
     this._db,
@@ -9,58 +11,17 @@ class StockAdjustmentService {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
-  static const String adjustPermission = 'stock:adjust';
-  static const String readPermission = 'item:read';
-  static const String adjustDeniedMessage =
+  static const adjustDeniedMessage =
       'Akses ditolak: Anda tidak memiliki izin stock:adjust.';
-  static const String readDeniedMessage =
-      'Akses ditolak: Anda tidak memiliki izin item:read.';
 
   final Database _db;
-  final StaffPermissionChecker _checkPermission;
+  final PermissionChecker _checkPermission;
   final DateTime Function() _now;
-
-  /// Dipakai UI untuk memutuskan apakah aksi tertentu boleh ditampilkan.
-  Future<StockPermissionDecision> checkPermission(String permissionKey) {
-    return _checkPermission(permissionKey);
-  }
-
-  Future<WarehouseItemsResult> getItems() async {
-    final decision = await _checkPermission(readPermission);
-    if (!decision.allowed) {
-      return const WarehouseItemsResult(
-        allowed: false,
-        items: [],
-        errorMessage: readDeniedMessage,
-      );
-    }
-
-    final rows = await _db.query(
-      'warehouse_items',
-      columns: const [
-        'id',
-        'sku',
-        'name',
-        'category',
-        'location',
-        'stock',
-        'satuan',
-        'min_stock',
-        'updated_at',
-      ],
-      orderBy: 'name ASC',
-    );
-    return WarehouseItemsResult(
-      allowed: true,
-      items: rows.map(WarehouseItem.fromMap).toList(),
-    );
-  }
 
   Future<StockAdjustmentResult> adjustStock(
     StockAdjustmentRequest request,
   ) async {
-    final decision = await _checkPermission(adjustPermission);
-    if (!decision.allowed) {
+    if (!await _checkPermission(AppPermissions.stockAdjust)) {
       return StockAdjustmentResult.denied(adjustDeniedMessage);
     }
 
