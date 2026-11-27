@@ -1,39 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../core/app_theme.dart';
+import '../auth/components/register_screen.dart';
+import '../auth/state/auth_state.dart';
 import '../auth/types/auth_user.dart';
-import '../manager/item_management/item_management.dart';
+import '../manager/item_management/services/manager_item_service.dart';
+import '../manager/item_management/types/manager_models.dart';
+import '../shared/dashboard_widgets.dart';
+import '../shared/flow.dart';
+import '../shared/stock_movement_service.dart';
+import '../staff/stock_adjustment/stock_adjustment.dart';
 import 'admin_policy_page.dart';
 
-/// Beranda admin. Tampilan mengikuti referensi: header teal, kartu statistik,
-/// kolom pencarian, daftar barang, dan tombol mengelola izin peran.
+/// Beranda admin: header teal, kartu statistik, pencarian, daftar barang,
+/// dan akses ke halaman kebijakan izin peran.
 class AdminHomePage extends StatefulWidget {
   const AdminHomePage({
     super.key,
     required this.db,
     required this.user,
     this.onSwitchAccount,
+    this.authState,
   });
 
   final Database db;
   final AuthUser user;
   final VoidCallback? onSwitchAccount;
 
+  /// AuthState untuk membuat akun manager/staff dari beranda admin.
+  final AuthState? authState;
+
   @override
   State<AdminHomePage> createState() => _AdminHomePageState();
 }
 
 class _AdminHomePageState extends State<AdminHomePage> {
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _warmAmber = Color(0xFFF7B318);
-  static const _paleMint = Color(0xFFE8F1E9);
-  static const _darkText = Color(0xFF102A2A);
-
   final TextEditingController _searchController = TextEditingController();
-  List<_AdminItem> _items = const [];
+  List<ManagerItem> _items = const [];
   bool _isLoading = true;
+  bool _canCreate = false;
+  bool _canDelete = false;
+  bool _canAdjustStock = false;
   String _query = '';
+
+  late final StockMovementService _movementService =
+      StockMovementService(widget.db);
 
   @override
   void initState() {
@@ -51,18 +63,32 @@ class _AdminHomePageState extends State<AdminHomePage> {
     super.dispose();
   }
 
+  Future<bool> _checkPermission(String perm) async {
+    final rows = await widget.db.query(
+      'role_permissions',
+      columns: const ['permission_key'],
+      where: 'role_id = ? AND permission_key = ? AND is_active = 1',
+      whereArgs: [widget.user.roleId, perm],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<void> _loadItems() async {
     setState(() => _isLoading = true);
     try {
-      final rows = await widget.db.query(
-        'warehouse_items',
-        columns: const ['id', 'sku', 'name', 'category', 'location', 'stock'],
-        orderBy: 'sku ASC',
-      );
+      final service = ManagerItemService(widget.db, _checkPermission);
+      final result = await service.getItems();
+      final canCreate = await _checkPermission('item:create');
+      final canDelete = await _checkPermission('item:delete');
+      final canAdjustStock = await _checkPermission('stock:adjust');
       if (!mounted) return;
       setState(() {
-        _items = rows.map(_AdminItem.fromMap).toList();
+        _items = result.items;
         _isLoading = false;
+        _canCreate = canCreate;
+        _canDelete = canDelete;
+        _canAdjustStock = canAdjustStock;
       });
     } catch (_) {
       if (!mounted) return;
@@ -70,7 +96,7 @@ class _AdminHomePageState extends State<AdminHomePage> {
     }
   }
 
-  List<_AdminItem> get _filteredItems {
+  List<ManagerItem> get _filteredItems {
     if (_query.isEmpty) return _items;
     return _items.where((item) {
       return item.sku.toLowerCase().contains(_query) ||
@@ -80,31 +106,161 @@ class _AdminHomePageState extends State<AdminHomePage> {
     }).toList();
   }
 
+  /// Alur penuh "Tambah barang": form layar penuh → layar sukses.
   Future<void> _openAddItem() async {
-    final input = await ItemFormDialog.show(context);
+    if (!_canCreate) return;
+    final input = await ItemFormPage.show(context);
     if (input == null || !mounted) return;
 
-    final service = ManagerItemService(widget.db, (perm) async {
-      final rows = await widget.db.query(
-        'role_permissions',
-        columns: const ['permission_key'],
-        where: 'role_id = ? AND permission_key = ? AND is_active = 1',
-        whereArgs: [widget.user.roleId, perm],
-        limit: 1,
-      );
-      return rows.isNotEmpty;
-    });
-
+    final service = ManagerItemService(widget.db, _checkPermission);
     final result = await service.addItem(input, userId: widget.user.id);
     if (!mounted) return;
 
+    if (result.success) {
+      await _loadItems();
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => FlowSuccessScreen(
+            title: 'Barang tersimpan',
+            message:
+                '${input.name.trim()} (${input.sku.trim()}) sudah masuk ke daftar barang.',
+            bigValue: '${input.stock}',
+            bigValueLabel: input.satuan.trim(),
+            buttonLabel: 'Kembali ke daftar',
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: AppColors.errorRed,
+        ),
+      );
+    }
+  }
+
+  /// SATU alur gabungan "Ubah Barang": data + stok dalam satu layar
+  /// (form → konfirmasi → layar sukses).
+  Future<void> _openEditItem(ManagerItem item) async {
+    if (!_canCreate && !_canAdjustStock) return;
+    final stockService = StockAdjustmentService(
+      widget.db,
+      (perm) async => StockPermissionDecision(
+        allowed: await _checkPermission(perm),
+        missingPermission: null,
+      ),
+    );
+    await ItemEditPage.push(
+      context,
+      item: item,
+      canEditData: _canCreate,
+      canAdjustStock: _canAdjustStock,
+      saveData: (input) => ManagerItemService(widget.db, _checkPermission)
+          .updateItem(itemId: item.id, currentSku: item.sku, input: input),
+      adjustStock: (input) => stockService.adjustStock(
+        StockAdjustmentRequest(
+          itemId: item.id,
+          userId: widget.user.id,
+          type: input.type,
+          amount: input.amount,
+          reason: input.reason,
+        ),
+      ),
+    );
+    if (mounted) await _loadItems();
+  }
+
+  Future<void> _confirmDelete(ManagerItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+        title: const Text(
+          'Hapus barang?',
+          style: TextStyle(
+            color: AppColors.darkText,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          '${item.name} (${item.sku}) akan dihapus permanen dari daftar.',
+          style: const TextStyle(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Batal',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.errorRed,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final service = ManagerItemService(widget.db, _checkPermission);
+    final result = await service.deleteItem(item.id, item.sku);
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.success ? _primaryTeal : Colors.red.shade700,
+        backgroundColor:
+            result.success ? AppColors.primaryTeal : AppColors.errorRed,
       ),
     );
     if (result.success) await _loadItems();
+  }
+
+  /// Tap kartu → halaman detail penuh; tombol tunggal "Ubah Barang".
+  Future<void> _openDetail(ManagerItem item) async {
+    await ItemDetailPage.push(
+      context,
+      item: item,
+      movementService: _movementService,
+      canEdit: _canCreate,
+      canDelete: _canDelete,
+      canAdjustStock: _canAdjustStock,
+      onEdit: () => _openEditItem(item),
+      onDelete: () => _confirmDelete(item),
+    );
+    if (mounted) await _loadItems();
+  }
+
+  /// Buat akun manager/staff dari beranda admin (tanpa pindah login).
+  void _openCreateAccount() {
+    final authState = widget.authState;
+    if (authState == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Layanan akun tidak tersedia.'),
+          backgroundColor: AppColors.errorRed,
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RegisterScreen(
+          authState: authState,
+          adminMode: true,
+          onAccountCreated: () {},
+        ),
+      ),
+    );
   }
 
   void _openPolicy() {
@@ -124,385 +280,134 @@ class _AdminHomePageState extends State<AdminHomePage> {
     final filtered = _filteredItems;
     final lowStock = _items.where((item) => item.stock <= 10).length;
     return Scaffold(
-      backgroundColor: _paleMint,
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-              children: [
-                _buildTopBar(context),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          'Beranda gudang',
-                          style: TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.w700,
-                            color: _primaryTeal,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Kelola barang, pantau stok hari ini.',
-                          style: TextStyle(fontSize: 13, color: Colors.black54),
-                        ),
-                        const SizedBox(height: 18),
-                        _buildStatsCard(lowStock),
-                        const SizedBox(height: 18),
-                        _buildSearchField(),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            const Text(
-                              'Daftar barang',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: _primaryTeal,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '${filtered.length} barang',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.black54,
-                              ),
-                            ),
-                            const Spacer(),
-                            IconButton(
-                              onPressed: _openAddItem,
-                              icon: const Icon(Icons.add_circle_outline),
-                              color: _primaryTeal,
-                              tooltip: 'Tambah barang',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        if (_isLoading)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 40),
-                            child: Center(
-                              child: CircularProgressIndicator(color: _primaryTeal),
-                            ),
-                          )
-                        else if (filtered.isEmpty)
-                          _buildEmptyState()
-                        else
-                          ...filtered.map(
-                            (item) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _AdminItemCard(item: item),
-                            ),
-                          ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 50,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _warmAmber,
-                              foregroundColor: _darkText,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                            onPressed: _openPolicy,
-                            child: const Text(
-                              'Kelola izin peran',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+      backgroundColor: AppColors.paleMint,
+      appBar: AppBar(
+        title: const Text('Gudang RBAC'),
+        actions: [
+          IconButton(
+            onPressed: _openCreateAccount,
+            icon: const Icon(Icons.person_add_outlined),
+            tooltip: 'Buat akun manager / staff',
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopBar(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-      decoration: const BoxDecoration(
-        color: _primaryTeal,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(22),
-          bottomRight: Radius.circular(22),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.warehouse_outlined, color: Colors.white),
+          IconButton(
+            onPressed: _openPolicy,
+            icon: const Icon(Icons.shield_outlined),
+            tooltip: 'Kelola izin peran',
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.user.fullName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const Text(
-                  'Admin Sistem',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
+          IconButton(
+            onPressed: _isLoading ? null : _loadItems,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Muat ulang data',
           ),
           if (widget.onSwitchAccount != null)
             IconButton(
               onPressed: widget.onSwitchAccount,
-              color: _warmAmber,
-              tooltip: 'Ganti akun',
               icon: const Icon(Icons.logout),
+              tooltip: 'Ganti akun',
             ),
         ],
       ),
-    );
-  }
-
-  Widget _buildStatsCard(int lowStock) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _primaryTeal,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          _StatColumn(label: 'Jenis barang', value: '${_items.length}'),
-          const SizedBox(width: 28),
-          _StatColumn(label: 'Stok menipis', value: '$lowStock'),
-          const Spacer(),
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(
-              Icons.inventory_2_outlined,
-              color: Colors.white,
-              size: 30,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: RefreshIndicator(
+              color: AppColors.primaryTeal,
+              onRefresh: _loadItems,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+                children: [
+                  DashboardUserHeader(
+                    userName: widget.user.fullName,
+                    roleLabel: widget.user.roleId,
+                    onSwitchAccount: widget.onSwitchAccount,
+                  ),
+                  DashboardHeroCard(
+                    title: 'Beranda admin',
+                    subtitle: 'Kelola barang dan kebijakan izin peran.',
+                    stats: [
+                      DashboardStat('Jenis barang', '${_items.length}'),
+                      DashboardStat('Stok menipis', '$lowStock'),
+                    ],
+                    onStatTap: (i) {
+                      if (i == 1) _openPolicy();
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: const InputDecoration(
+                        hintText: 'Cari nama atau kode barang',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                    ),
+                  ),
+                  DashboardSectionTitle(count: filtered.length),
+                  if (_canCreate)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Row(
+                        children: [
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: _openAddItem,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('Tambah barang'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppColors.primaryTeal,
+                              textStyle: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.primaryTeal,
+                        ),
+                      ),
+                    )
+                  else if (filtered.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildEmptyState(),
+                    )
+                  else
+                    ...filtered.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                        child: DashboardItemCard(
+                          item: item,
+                          onTap: () => _openDetail(item),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchField() {
-    return TextField(
-      controller: _searchController,
-      decoration: InputDecoration(
-        hintText: 'Cari nama atau kode barang',
-        prefixIcon: const Icon(Icons.search, color: Colors.black54),
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: _softMint),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: _primaryTeal, width: 1.6),
         ),
       ),
     );
   }
 
   Widget _buildEmptyState() {
-    return Container(
+    return AppCard(
       padding: const EdgeInsets.symmetric(vertical: 36),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _softMint),
-      ),
       child: const Column(
         children: [
           Icon(Icons.inventory_2_outlined, size: 48, color: Colors.black26),
           SizedBox(height: 10),
           Text(
             'Tidak ada barang yang cocok.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: AppColors.textMuted),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatColumn extends StatelessWidget {
-  const _StatColumn({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: Colors.white70),
-        ),
-      ],
-    );
-  }
-}
-
-class _AdminItem {
-  const _AdminItem({
-    required this.id,
-    required this.sku,
-    required this.name,
-    required this.category,
-    required this.location,
-    required this.stock,
-  });
-
-  final int id;
-  final String sku;
-  final String name;
-  final String category;
-  final String location;
-  final int stock;
-
-  factory _AdminItem.fromMap(Map<String, Object?> map) {
-    return _AdminItem(
-      id: map['id']! as int,
-      sku: map['sku']! as String,
-      name: map['name']! as String,
-      category: map['category']! as String,
-      location: map['location']! as String,
-      stock: map['stock']! as int,
-    );
-  }
-}
-
-class _AdminItemCard extends StatelessWidget {
-  const _AdminItemCard({required this.item});
-
-  final _AdminItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final lowStock = item.stock <= 10;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE3EDE4)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F1E9),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(
-              Icons.inventory_2_outlined,
-              color: Color(0xFF145858),
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: _AdminHomePageState._darkText,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '${item.sku} · ${item.location}',
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Text(
-                      '${item.stock} rim',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: _AdminHomePageState._darkText,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: lowStock
-                            ? const Color(0xFFFFF0C2)
-                            : const Color(0xFFE3F2E7),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        lowStock ? 'Menipis' : 'Tersedia',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: lowStock
-                              ? const Color(0xFF8A6100)
-                              : const Color(0xFF145858),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_right, color: Colors.black38),
         ],
       ),
     );

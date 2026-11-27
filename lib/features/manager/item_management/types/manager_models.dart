@@ -6,6 +6,8 @@ class ManagerItem {
     required this.category,
     required this.location,
     required this.stock,
+    this.satuan = 'unit',
+    this.minStock = 10,
   });
 
   final int id;
@@ -15,6 +17,12 @@ class ManagerItem {
   final String location;
   final int stock;
 
+  /// Satuan barang, mis. "pasang", "lembar", "unit".
+  final String satuan;
+
+  /// Batas stok minimum sebelum barang dianggap "menipis".
+  final int minStock;
+
   factory ManagerItem.fromMap(Map<String, Object?> map) {
     return ManagerItem(
       id: map['id']! as int,
@@ -23,6 +31,8 @@ class ManagerItem {
       category: map['category']! as String,
       location: map['location']! as String,
       stock: map['stock']! as int,
+      satuan: (map['satuan'] ?? 'unit') as String,
+      minStock: (map['min_stock'] ?? 10) as int,
     );
   }
 }
@@ -34,6 +44,8 @@ class ManagerItemInput {
     required this.category,
     required this.location,
     required this.stock,
+    this.satuan = 'unit',
+    this.minStock = 10,
   });
 
   final String sku;
@@ -41,6 +53,12 @@ class ManagerItemInput {
   final String category;
   final String location;
   final int stock;
+
+  /// Satuan barang, mis. "pasang", "lembar", "unit".
+  final String satuan;
+
+  /// Batas stok minimum sebelum barang dianggap "menipis".
+  final int minStock;
 }
 
 class ManagerItemResult {

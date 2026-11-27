@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rbac/features/auth/auth.dart';
+import 'package:rbac/features/shared/flow/flow_widgets.dart';
 import 'package:rbac/features/staff/stock_adjustment/stock_adjustment.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -33,15 +34,24 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Label berada di luar field (FlowField), jadi cari field langsung.
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Email atau Username'),
-      'staff@gudang.demo',
+      find.byType(TextFormField).at(0),
+      'staff',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Password'),
+      find.byType(TextFormField).at(1),
       'demo123',
     );
-    await tester.tap(find.text('Masuk'));
+    // Tombol amber "Masuk" — bukan tab ghost bernama sama.
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(AmberButton),
+            matching: find.text('Masuk'),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
 
     expect(authState.activeUser?.id, 1);
@@ -59,9 +69,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Petugas Gudang (staff)'));
+    await tester.ensureVisible(find.text('Petugas Gudang · staff'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Masuk'));
+    await tester.tap(find.text('Petugas Gudang · staff'));
     await tester.pumpAndSettle();
 
     expect(authState.activeUser?.id, 1);
@@ -80,6 +90,7 @@ void main() {
       MaterialApp(
         home: StaffInventoryView(
           service: service,
+          db: db,
           activeUserId: 1,
           activeUserName: 'Petugas Gudang',
           activeRoleLabel: 'staff',
@@ -89,23 +100,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Sepatu Safety Steel Toe'), findsOneWidget);
-    expect(find.text('SKU-1001'), findsOneWidget);
-    expect(find.text('Stok: 10'), findsOneWidget);
+    expect(find.textContaining('SKU-1001'), findsOneWidget);
+    expect(find.textContaining('10 pasang'), findsOneWidget);
 
-    await tester.tap(find.text('Ubah Stok').last);
+    // Buka detail lewat tap kartu, lalu alur multi-layar:
+    // Detail → Ubah Barang (form gabungan) → Konfirmasi → layar sukses.
+    await tester.ensureVisible(find.text('Sepatu Safety Steel Toe'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sepatu Safety Steel Toe'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Ubah Stok'));
+    await tester.tap(find.text('Ubah Stok'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Jumlah perubahan'),
-      '4',
-    );
-    await tester.tap(find.text('Koreksi stok'));
-    await tester.pump();
-    await tester.tap(find.text('Simpan'));
+    // Staff hanya boleh ubah stok: field pertama = Jumlah stok (angka final).
+    // Field diawali stok saat ini (10); ketik 14 = stok masuk 4.
+    await tester.enterText(find.byType(TextFormField).first, '14');
+    await tester.ensureVisible(find.text('Simpan perubahan'));
+    await tester.tap(find.text('Simpan perubahan'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Ya, simpan perubahan'));
+    await tester.tap(find.text('Ya, simpan perubahan'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Stok berhasil diperbarui.'), findsWidgets);
-    expect(find.text('Stok: 14'), findsOneWidget);
+    expect(find.text('Stok berhasil diubah'), findsOneWidget);
+    await tester.tap(find.text('Kembali ke daftar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('14 pasang'), findsOneWidget);
   });
 
   testWidgets('StaffInventoryView shows exact denial message when permission missing', (
@@ -123,19 +145,13 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: StaffInventoryView(service: service, activeUserId: 1),
+        home: StaffInventoryView(service: service, db: db, activeUserId: 1),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Ubah Stok').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Simpan'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text('Akses ditolak: Anda tidak memiliki izin stock:adjust.'),
-      findsWidgets,
-    );
+    // Tanpa izin, tombol "Ubah Stok" tidak dirender sama sekali
+    // dan tidak ada dialog yang bisa dibuka.
+    expect(find.text('Ubah Stok'), findsNothing);
   });
 }

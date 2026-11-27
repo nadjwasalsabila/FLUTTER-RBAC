@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/app_theme.dart';
+import '../../shared/flow/flow_widgets.dart';
 import '../state/auth_state.dart';
 import '../types/auth_user.dart';
-import 'demo_quick_fill_bar.dart';
-import 'login_brand_header.dart';
+import 'register_screen.dart';
 
+/// Layar login sesuai mockup: hero ilustrasi gudang di atas,
+/// tab pill "Masuk / Buat akun", field putih label di atas,
+/// tombol amber pill, dan chip akun demo di bawah.
 class DemoLoginScreen extends StatefulWidget {
   const DemoLoginScreen({
     super.key,
@@ -20,16 +24,12 @@ class DemoLoginScreen extends StatefulWidget {
 }
 
 class _DemoLoginScreenState extends State<DemoLoginScreen> {
-  static const _primaryTeal = Color(0xFF145858);
-  static const _softMint = Color(0xFFC8E0CA);
-  static const _warmAmber = Color(0xFFF7B318);
-  static const _darkText = Color(0xFF102A2A);
-
-  final _formKey = GlobalKey<FormState>();
+  final _loginKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isSubmitting = false;
+  String? _inlineError;
 
   @override
   void initState() {
@@ -50,70 +50,60 @@ class _DemoLoginScreenState extends State<DemoLoginScreen> {
 
   void _fillDemoCredentials(AuthUser user) {
     setState(() {
-      _emailController.text = '${user.username}@gudang.demo';
-      _passwordController.text = 'demo123';
+      _emailController.text = user.username;
+      _passwordController.text = AuthState.demoPassword;
+      _inlineError = null;
     });
   }
 
+  /// Chip demo langsung login — tidak perlu menekan "Masuk" dua kali.
+  Future<void> _loginAsDemoUser(AuthUser demoUser) async {
+    if (_isSubmitting) return;
+    setState(() {
+      _isSubmitting = true;
+      _inlineError = null;
+    });
+    final loggedIn = await widget.authState.loginWithCredentials(
+      demoUser.username,
+      AuthState.demoPassword,
+    );
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
+    if (loggedIn != null) widget.onUserSelected?.call(loggedIn);
+  }
+
   Future<void> _submitLogin() async {
-    if (!(_formKey.currentState?.validate() ?? false) || _isSubmitting) return;
-    setState(() => _isSubmitting = true);
+    if (!(_loginKey.currentState?.validate() ?? false) || _isSubmitting) return;
+    setState(() {
+      _isSubmitting = true;
+      _inlineError = null;
+    });
     final user = await widget.authState.loginWithCredentials(
       _emailController.text,
       _passwordController.text,
     );
     if (!mounted) return;
     setState(() => _isSubmitting = false);
-    if (user != null) widget.onUserSelected?.call(user);
-  }
-
-  InputDecoration _inputDecoration(String label, String hint, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      prefixIcon: Icon(icon, color: _primaryTeal),
-      filled: true,
-      fillColor: Colors.white,
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _softMint, width: 1.2),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _primaryTeal, width: 1.8),
-      ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    );
+    if (user != null) {
+      widget.onUserSelected?.call(user);
+    } else {
+      setState(() => _inlineError = 'Email atau password salah.');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F8F6),
+      backgroundColor: AppColors.paleMint,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _softMint, width: 1.2),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x14145858),
-                      blurRadius: 20,
-                      offset: Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: ListenableBuilder(
-                  listenable: widget.authState,
-                  builder: (context, _) => _buildCardContent(),
-                ),
+              child: ListenableBuilder(
+                listenable: widget.authState,
+                builder: (context, _) => _buildCardContent(),
               ),
             ),
           ),
@@ -123,72 +113,266 @@ class _DemoLoginScreenState extends State<DemoLoginScreen> {
   }
 
   Widget _buildCardContent() {
-    final error = widget.authState.errorMessage;
+    final error = _inlineError ?? widget.authState.errorMessage;
     return Form(
-      key: _formKey,
+      key: _loginKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const LoginBrandHeader(),
+          const _LoginHero(),
           const SizedBox(height: 20),
-          TextFormField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            decoration: _inputDecoration('Email atau Username', 'staff@gudang.demo', Icons.email_outlined),
-            validator: (v) => (v == null || v.trim().isEmpty) ? 'Email atau username wajib diisi.' : null,
+          _buildErrorBanner(error),
+          FlowField(
+            label: 'Username atau Email',
+            child: TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(hintText: 'staff'),
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Username wajib diisi.'
+                  : null,
+            ),
           ),
           const SizedBox(height: 14),
-          TextFormField(
-            controller: _passwordController,
-            obscureText: _obscurePassword,
-            decoration: _inputDecoration('Password', 'Masukkan password', Icons.lock_outline).copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: _primaryTeal),
-                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+          FlowField(
+            label: 'Password',
+            child: TextFormField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              onFieldSubmitted: (_) => _submitLogin(),
+              decoration: InputDecoration(
+                hintText: 'demo123',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    color: AppColors.primaryTeal,
+                    size: 20,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
               ),
-            ),
-            validator: (v) => (v == null || v.isEmpty) ? 'Password wajib diisi.' : null,
-          ),
-          if (error != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF6E0),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _warmAmber),
-              ),
-              child: Text(error, style: const TextStyle(color: _darkText)),
-            ),
-          ],
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 48,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryTeal,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: _isSubmitting ? null : _submitLogin,
-              child: _isSubmitting
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('Masuk', style: TextStyle(fontWeight: FontWeight.w600)),
+              validator: (v) =>
+                  (v == null || v.isEmpty) ? 'Password wajib diisi.' : null,
             ),
           ),
-          const SizedBox(height: 18),
-          DemoQuickFillBar(
-            users: widget.authState.users,
-            isLoading: widget.authState.isLoading,
-            onSelectUser: _fillDemoCredentials,
+          const SizedBox(height: 20),
+          AmberButton(
+            label: 'Masuk',
+            enabled: !_isSubmitting,
+            onTap: _submitLogin,
           ),
+          if (_isSubmitting)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Center(
+                child: SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primaryTeal,
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 22),
+          _buildDemoAccounts(),
         ],
       ),
     );
+  }
+
+  Widget _buildErrorBanner(String? error) {
+    if (error == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.errorBg,
+          borderRadius: BorderRadius.circular(AppRadius.chip),
+          border: Border.all(color: AppColors.errorRed, width: 1),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline,
+                color: AppColors.errorRed, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                error,
+                style: const TextStyle(
+                  color: AppColors.errorRed,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDemoAccounts() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Expanded(child: Divider(color: AppColors.border)),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                'Masuk cepat sebagai',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+            Expanded(child: Divider(color: AppColors.border)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (widget.authState.isLoading)
+          const LinearProgressIndicator(color: AppColors.primaryTeal)
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: widget.authState.users.map((user) {
+              return ActionChip(
+                avatar: const Icon(
+                  Icons.login_rounded,
+                  size: 16,
+                  color: AppColors.primaryTeal,
+                ),
+                backgroundColor: AppColors.surface,
+                side: const BorderSide(color: AppColors.border),
+                label: Text(
+                  '${user.fullName} · ${user.roleId}',
+                  style: const TextStyle(
+                    color: AppColors.darkText,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+                onPressed: () {
+                  _fillDemoCredentials(user);
+                  _loginAsDemoUser(user);
+                },
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+}
+
+/// Hero atas layar login sesuai mockup: ilustrasi gudang besar,
+/// judul, dan subtitle.
+class _LoginHero extends StatelessWidget {
+  const _LoginHero();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 150,
+          child: Image.asset(
+            'assets/onboarding/warehouse_onboarding.png',
+            fit: BoxFit.contain,
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Gudang RBAC',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            color: AppColors.darkText,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Masuk untuk mengelola stok gudang',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 16),
+        // Baris pemisah antara login dan buat akun.
+        Builder(
+          builder: (context) {
+            return Row(
+              children: [
+                Expanded(
+                  child: GhostButton(
+                    label: 'Masuk',
+                    onTap: () {},
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _NavToRegister(),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Tombol "Buat akun" — hanya teks, buka layar registrasi.
+class _NavToRegister extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => RegisterScreen(authState: _authStateOf(context)),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 15),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Text(
+              'Buat akun',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.darkText,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  AuthState _authStateOf(BuildContext context) {
+    // Ambil AuthState dari ancestor paling dekat yang memilikinya.
+    final state = context.findAncestorStateOfType<_DemoLoginScreenState>();
+    return state!.widget.authState;
   }
 }
