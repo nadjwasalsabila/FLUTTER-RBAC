@@ -1,12 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../manager/item_management/types/manager_models.dart';
-
-/// Dashboard per role sesuai mockup:
-/// header pengguna (avatar + nama + role + tombol ganti akun),
-/// kartu hero teal gelap "Beranda gudang" dengan tile statistik,
-/// pencarian, dan daftar barang (stok besar + chip Tersedia/Menipis).
+import '../models/warehouse_models.dart';
 
 /// Header atas: avatar, nama, role, dan tombol ganti akun amber.
 class DashboardUserHeader extends StatelessWidget {
@@ -64,19 +59,22 @@ class DashboardUserHeader extends StatelessWidget {
             ),
           ),
           if (onSwitchAccount != null)
-            GestureDetector(
-              onTap: onSwitchAccount,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                  color: AppColors.warmAmber,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.swap_horiz_rounded,
-                  color: Colors.white,
-                  size: 20,
+            Tooltip(
+              message: 'Ganti akun',
+              child: GestureDetector(
+                onTap: onSwitchAccount,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    color: AppColors.warmAmber,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.swap_horiz_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
               ),
             ),
@@ -93,22 +91,15 @@ class DashboardHeroCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.stats,
-    this.onStatTap,
   });
 
   final String title;
   final String subtitle;
-
-  /// Maksimal 2 statistik: (icon, label, value, accent).
   final List<DashboardStat> stats;
-  final void Function(int index)? onStatTap;
 
   @override
   Widget build(BuildContext context) {
-    final colors = [
-      Colors.white,
-      const Color(0xFFF7B318),
-    ];
+    const colors = [Colors.white, AppColors.warmAmber];
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(18),
@@ -116,17 +107,13 @@ class DashboardHeroCard extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF1B6B63),
-            Color(0xFF145858),
-          ],
+          colors: [Color(0xFF1B6B63), Color(0xFF145858)],
         ),
         borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Baris atas: Judul + Subjudul di kiri, ilustrasi gudang di kanan atas.
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -165,7 +152,6 @@ class DashboardHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // Baris bawah: 2 tile statistik mentok penuh (tanpa gambar di baris ini).
           Row(
             children: [
               for (var i = 0; i < stats.take(2).length; i++) ...[
@@ -174,8 +160,6 @@ class DashboardHeroCard extends StatelessWidget {
                   child: _HeroStatTile(
                     stat: stats[i],
                     valueColor: colors[i % colors.length],
-                    onTap:
-                        onStatTap == null ? null : () => onStatTap!(i),
                   ),
                 ),
               ],
@@ -188,78 +172,41 @@ class DashboardHeroCard extends StatelessWidget {
 }
 
 class DashboardStat {
-  const DashboardStat(this.label, this.value, {this.icon});
+  const DashboardStat(this.label, this.value);
   final String label;
   final String value;
-  final IconData? icon;
 }
 
 class _HeroStatTile extends StatelessWidget {
-  const _HeroStatTile({required this.stat, required this.valueColor, this.onTap});
+  const _HeroStatTile({required this.stat, required this.valueColor});
 
   final DashboardStat stat;
   final Color valueColor;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.14),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                stat.value,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: valueColor,
-                  height: 1.0,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                stat.label,
-                style: const TextStyle(fontSize: 11, color: Colors.white70),
-              ),
-            ],
-          ),
-        ),
       ),
-    );
-  }
-}
-
-/// Judul seksi daftar barang: "Daftar barang" + jumlah di kanan.
-class DashboardSectionTitle extends StatelessWidget {
-  const DashboardSectionTitle({super.key, required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Daftar barang',
+          Text(
+            stat.value,
             style: TextStyle(
-              fontSize: 15,
+              fontSize: 26,
               fontWeight: FontWeight.w800,
-              color: AppColors.darkText,
+              color: valueColor,
+              height: 1.0,
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 6),
           Text(
-            '$count barang',
-            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            stat.label,
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
           ),
         ],
       ),
@@ -267,8 +214,7 @@ class DashboardSectionTitle extends StatelessWidget {
   }
 }
 
-/// Kartu barang gaya dashboard mockup: ikon kotak, nama, SKU · kategori,
-/// stok besar "120 rim", chip status Tersedia/Menipis, chevron kanan.
+/// Kartu barang: ikon kotak, nama, SKU · kategori, stok besar, chip status.
 class DashboardItemCard extends StatelessWidget {
   const DashboardItemCard({
     super.key,
@@ -276,12 +222,12 @@ class DashboardItemCard extends StatelessWidget {
     this.onTap,
   });
 
-  final ManagerItem item;
+  final WarehouseItem item;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isLowStock = item.stock <= item.minStock;
+    final isLowStock = item.isLowStock;
     return Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(18),
@@ -375,10 +321,7 @@ class DashboardItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textMuted,
-              ),
+              const Icon(Icons.chevron_right, color: AppColors.textMuted),
             ],
           ),
         ),
@@ -387,7 +330,7 @@ class DashboardItemCard extends StatelessWidget {
   }
 }
 
-/// Bar bawah dashboard: pesan bantuan ("Pilih barang untuk ...").
+/// Bar bawah dashboard: pesan bantuan.
 class DashboardHintBar extends StatelessWidget {
   const DashboardHintBar({super.key, required this.message});
 
@@ -396,7 +339,7 @@ class DashboardHintBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -407,10 +350,7 @@ class DashboardHintBar extends StatelessWidget {
         ),
         child: Text(
           message,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppColors.textMuted,
-          ),
+          style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
         ),
       ),
     );

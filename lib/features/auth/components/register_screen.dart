@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/app_theme.dart';
-import '../../shared/flow/flow_widgets.dart';
+import '../../../core/widgets/flow_widgets.dart';
 import '../state/auth_state.dart';
 import '../types/auth_user.dart';
 
